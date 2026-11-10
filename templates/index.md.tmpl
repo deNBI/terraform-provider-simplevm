@@ -1,0 +1,76 @@
+---
+page_title: "{{.ProviderShortName}} Provider"
+description: |-
+  {{.Description}}
+---
+
+# {{.ProviderShortName}} Provider
+
+{{.Description}}
+
+The provider works with both OpenTofu and Terraform. Resources that take time
+in SimpleVM (VMs, volumes, attachments, snapshots) wait until the operation has
+finished, within configurable `timeouts`.
+
+## Installation
+
+Declare the provider in `required_providers`. The `source` is the same for
+OpenTofu and Terraform; each downloads it from its own registry.
+
+```terraform
+terraform {
+  required_providers {
+    simplevm = {
+      source = "deNBI/simplevm"
+    }
+  }
+}
+```
+
+## Authentication
+
+The provider authenticates with a SimpleVM API key, sent in the `X-API-KEY`
+header.
+
+1. Open your project in the SimpleVM portal and go to the **API Key** tab.
+   API keys are a beta feature and available on request.
+2. Create a key. Keys belong to one project and carry scopes; select what the
+   provider needs:
+    - `project:read` for projects, flavors, images and snapshot images,
+    - `vm:read` and the VM change scopes to list, create, stop, resume and delete VMs,
+    - the volume scopes, including `volume:change_state` to attach, detach and extend volumes.
+3. Choose an expiry date. Decide whether the key may only touch objects it created
+   ("own objects only") or all objects of the project.
+4. Copy the key. It is shown once.
+
+Keep the key out of your configuration; use environment variables:
+
+```bash
+export SIMPLEVM_API_KEY="..."
+export SIMPLEVM_PROJECT_ID="1234"
+```
+
+| Environment variable | Provider argument | Description |
+|----------------------|-------------------|-------------|
+| `SIMPLEVM_API_KEY` | `api_key` | API key. |
+| `SIMPLEVM_PROJECT_ID` | `project_id` | Default project for resources. |
+| `SIMPLEVM_ENDPOINT` | `endpoint` | API base URL; must be `https` (plain `http` is accepted only for loopback addresses, for testing). |
+| `SIMPLEVM_POLL_INTERVAL` | none | Polling interval as a Go duration such as `10s`. For development and testing only. |
+
+## Example Usage
+
+{{ tffile "examples/provider/provider.tf" }}
+
+## Limitations
+
+- Clusters (BiBiGrid) are not supported.
+- Members and access sharing are not managed. The owner of the API key becomes
+  the owner of the VMs it creates; manage sharing in the SimpleVM portal.
+- SimpleVM has no API to delete a snapshot. Destroying a `simplevm_snapshot`
+  only removes it from the state; delete the image in the portal under
+  Images/Snapshots.
+- A few request formats are not documented in the SimpleVM OpenAPI schema (the
+  body of the VM create request, volume action parameters). They are assumed
+  from the SimpleVM wiki and verified against the real API in the acceptance tests.
+
+{{ .SchemaMarkdown | trimspace }}
