@@ -7,6 +7,8 @@ import (
 
 	"github.com/deNBI/terraform-provider-simplevm/internal/client"
 	"github.com/deNBI/terraform-provider-simplevm/internal/fakeapi"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -122,4 +124,24 @@ func TestVolume_Disappears(t *testing.T) {
 			Check: resource.TestCheckResourceAttr(volAddr, "status", "available"),
 		}},
 	})
+}
+
+func TestVolumeSizeShrinks(t *testing.T) {
+	for name, tc := range map[string]struct {
+		plan, state types.Int64
+		want        bool
+	}{
+		"unknown plan": {types.Int64Unknown(), types.Int64Value(20), false},
+		"null plan":    {types.Int64Null(), types.Int64Value(20), false},
+		"grow":         {types.Int64Value(30), types.Int64Value(20), false},
+		"equal":        {types.Int64Value(20), types.Int64Value(20), false},
+		"shrink":       {types.Int64Value(10), types.Int64Value(20), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := sizeShrinks(planmodifier.Int64Request{PlanValue: tc.plan, StateValue: tc.state})
+			if got != tc.want {
+				t.Errorf("sizeShrinks = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

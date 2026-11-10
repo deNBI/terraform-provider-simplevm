@@ -40,6 +40,13 @@ type volumeModel struct {
 	Path             types.String   `tfsdk:"path"`
 }
 
+// sizeShrinks reports whether the planned size is known and smaller than the
+// state size. Unknown or null plans never require replacement.
+func sizeShrinks(req planmodifier.Int64Request) bool {
+	return !req.PlanValue.IsUnknown() && !req.PlanValue.IsNull() && !req.StateValue.IsNull() &&
+		req.PlanValue.ValueInt64() < req.StateValue.ValueInt64()
+}
+
 type volumeResource struct{ pd *ProviderData }
 
 // NewVolumeResource returns the simplevm_volume resource.
@@ -84,7 +91,7 @@ func (r *volumeResource) Schema(ctx context.Context, _ resource.SchemaRequest, r
 				Validators: []validator.Int64{int64validator.AtLeast(1)},
 				PlanModifiers: []planmodifier.Int64{int64planmodifier.RequiresReplaceIf(
 					func(_ context.Context, req planmodifier.Int64Request, resp *int64planmodifier.RequiresReplaceIfFuncResponse) {
-						resp.RequiresReplace = req.PlanValue.ValueInt64() < req.StateValue.ValueInt64()
+						resp.RequiresReplace = sizeShrinks(req)
 					},
 					"A smaller size replaces the volume (data loss).",
 					"A smaller `size` replaces the volume (data loss).",
@@ -220,9 +227,13 @@ func (r *volumeResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 	// Extending leaves the volume in the status it had before.
-	target := client.VolumeStatusAvailable
-	if vol.Status == client.VolumeStatusInUse {
-		target = client.VolumeStatusInUse
+	target := vol.Status
+	extend := plan.Size.ValueInt64() > state.Size.ValueInt64()
+	if extend && target != client.VolumeStatusAvailable && target != client.VolumeStatusInUse {
+		resp.State.Raw = req.State.Raw
+		resp.Diagnostics.AddError("Unable to extend volume "+uuid,
+			fmt.Sprintf("volume has status %q; it must be %q or %q to be extended", target, client.VolumeStatusAvailable, client.VolumeStatusInUse))
+		return
 	}
 
 	// Whatever happens below, state keeps what was not changed yet.
@@ -244,7 +255,7 @@ func (r *volumeResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 		vol = renamed
 	}
-	if plan.Size.ValueInt64() > state.Size.ValueInt64() {
+	if extend {
 		if _, err := r.pd.Client.VolumeAction(ctx, uuid, client.VolumeActionRequest{
 			OSAction: "extend", Size: plan.Size.ValueInt64(),
 		}); err != nil {
