@@ -1,0 +1,59 @@
+name: Acceptance
+
+# Creates real, billable VMs in a SimpleVM project. Run manually or weekly.
+on:
+  workflow_dispatch:
+    inputs:
+      cli:
+        description: CLI used to run the tests
+        type: choice
+        options: [terraform, tofu]
+        default: terraform
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      SIMPLEVM_API_KEY: ${{ secrets.SIMPLEVM_API_KEY }}
+      SIMPLEVM_PROJECT_ID: ${{ secrets.SIMPLEVM_PROJECT_ID }}
+      CLI: ${{ inputs.cli || 'terraform' }}
+    steps:
+      - name: Skip without credentials
+        if: env.SIMPLEVM_API_KEY == ''
+        run: echo "::notice::SIMPLEVM_API_KEY secret is not set; skipping acceptance tests."
+      - if: env.SIMPLEVM_API_KEY != ''
+        uses: actions/checkout@v4
+      - if: env.SIMPLEVM_API_KEY != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - if: env.SIMPLEVM_API_KEY != '' && env.CLI == 'terraform'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - if: env.SIMPLEVM_API_KEY != '' && env.CLI == 'tofu'
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_wrapper: false
+      - name: Select CLI for terraform-plugin-testing
+        if: env.SIMPLEVM_API_KEY != ''
+        run: |
+          echo "TF_ACC_TERRAFORM_PATH=$(command -v "$CLI")" >> "$GITHUB_ENV"
+          if [ "$CLI" = "tofu" ]; then
+            echo "TF_ACC_PROVIDER_HOST=registry.opentofu.org" >> "$GITHUB_ENV"
+            echo "TF_ACC_PROVIDER_NAMESPACE=deNBI" >> "$GITHUB_ENV"
+          fi
+      - name: Run acceptance tests
+        if: env.SIMPLEVM_API_KEY != ''
+        run: make testacc

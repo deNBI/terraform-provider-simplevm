@@ -1,0 +1,84 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go mod tidy must not change anything
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - run: go build ./...
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+
+  generate:
+    name: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: make docs
+      - name: docs/ must be up to date
+        run: git diff --exit-code
+
+  test:
+    name: test (${{ matrix.cli }} ${{ matrix.version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cli: terraform, version: "1.5.*" }
+          - { cli: terraform, version: "latest" }
+          - { cli: tofu, version: "1.6.*" }
+          - { cli: tofu, version: "latest" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - if: matrix.cli == 'terraform'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ matrix.version }}
+          terraform_wrapper: false
+      - if: matrix.cli == 'tofu'
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ matrix.version }}
+          tofu_wrapper: false
+      - name: Select CLI for terraform-plugin-testing
+        run: |
+          echo "TF_ACC_TERRAFORM_PATH=$(command -v "${{ matrix.cli }}")" >> "$GITHUB_ENV"
+          if [ "${{ matrix.cli }}" = "tofu" ]; then
+            echo "TF_ACC_PROVIDER_HOST=registry.opentofu.org" >> "$GITHUB_ENV"
+            echo "TF_ACC_PROVIDER_NAMESPACE=deNBI" >> "$GITHUB_ENV"
+          fi
+      - run: go test ./... -count=1 -race -timeout 20m
