@@ -9,7 +9,10 @@ import (
 	"github.com/deNBI/terraform-provider-simplevm/internal/client"
 	"github.com/deNBI/terraform-provider-simplevm/internal/fakeapi"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const attAddr = "simplevm_volume_attachment.test"
@@ -49,12 +52,14 @@ func attachmentID(s *terraform.State) (string, error) {
 
 func TestVolumeAttachment_Lifecycle(t *testing.T) {
 	s := newFake(t)
+	var device string
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		CheckDestroy:             checkNoVMs(t, s),
 		Steps: []resource.TestStep{{
 			Config: attachmentBase(s) + attachmentResource,
 			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrWith(attAddr, "device", func(v string) error { device = v; return nil }),
 				resource.TestCheckResourceAttrSet(attAddr, "device"),
 				resource.TestCheckResourceAttrSet(attAddr, "path"),
 				func(st *terraform.State) error {
@@ -80,6 +85,26 @@ func TestVolumeAttachment_Lifecycle(t *testing.T) {
 					return nil
 				},
 			),
+		}, {
+			Config: attachmentBase(s) + `
+resource "simplevm_volume_attachment" "test" {
+  volume_id = simplevm_volume.test.id
+  vm_id     = simplevm_vm.test.id
+  timeouts = {
+    create = "5m"
+  }
+}
+`,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(attAddr, plancheck.ResourceActionUpdate),
+				plancheck.ExpectKnownValue(attAddr, tfjsonpath.New("device"), knownvalue.StringExact("/dev/vdb")),
+			}},
+			Check: resource.TestCheckResourceAttrWith(attAddr, "device", func(v string) error {
+				if v != device {
+					return fmt.Errorf("device = %q, want %q", v, device)
+				}
+				return nil
+			}),
 		}, {
 			ResourceName:      attAddr,
 			ImportState:       true,

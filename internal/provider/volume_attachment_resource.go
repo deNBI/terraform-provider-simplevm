@@ -24,6 +24,8 @@ var (
 // The attachment has no update; only create and delete are configurable.
 var attachmentTimeouts = opTimeouts{Create: 10 * time.Minute, Delete: 10 * time.Minute}
 
+const volumeStatusDetaching = "detaching"
+
 type volumeAttachmentModel struct {
 	ID       types.String   `tfsdk:"id"`
 	VolumeID types.String   `tfsdk:"volume_id"`
@@ -71,10 +73,12 @@ func (r *volumeAttachmentResource) Schema(ctx context.Context, _ resource.Schema
 			"device": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "Device name inside the VM, for example `/dev/vdb`.",
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"path": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "Mount path of the volume as reported by SimpleVM.",
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 		},
 	}
@@ -216,6 +220,7 @@ func (r *volumeAttachmentResource) Delete(ctx context.Context, req resource.Dele
 	}
 	// A destroyed VM has its volumes detached by SimpleVM; a volume that is
 	// available or attached elsewhere needs no detach.
+	// A volume already detaching from this VM only needs the wait below.
 	if vol.Status != client.VolumeStatusAvailable {
 		vm, err := r.pd.Client.GetVM(ctx, vmID)
 		switch {
@@ -227,9 +232,11 @@ func (r *volumeAttachmentResource) Delete(ctx context.Context, req resource.Dele
 		case !isAttachedTo(vol, vm):
 			return
 		}
-		if _, err := r.pd.Client.VolumeAction(ctx, volID, client.VolumeActionRequest{OSAction: client.VolumeActionDetach}); err != nil {
-			resp.Diagnostics.AddError("Unable to detach volume "+volID, err.Error())
-			return
+		if vol.Status != volumeStatusDetaching {
+			if _, err := r.pd.Client.VolumeAction(ctx, volID, client.VolumeActionRequest{OSAction: client.VolumeActionDetach}); err != nil {
+				resp.Diagnostics.AddError("Unable to detach volume "+volID, err.Error())
+				return
+			}
 		}
 	}
 	if _, err := r.waitVolume(ctx, volID, func(v *client.Volume) (bool, error) {
