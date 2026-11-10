@@ -29,7 +29,7 @@ jobs:
       - run: go build ./...
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.15.0
 
   generate:
     name: generate
@@ -45,7 +45,13 @@ jobs:
           terraform_wrapper: false
       - run: make docs
       - name: docs/ must be up to date
-        run: git diff --exit-code
+        run: |
+          if [ -n "$(git status --porcelain docs examples)" ]; then
+            echo "::error::docs are stale - run make docs and commit the result"
+            git status --porcelain docs examples
+            git diff
+            exit 1
+          fi
 
   test:
     name: test (${{ matrix.cli }} ${{ matrix.version }})
