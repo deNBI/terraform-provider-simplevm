@@ -199,5 +199,10 @@ func (p *simpleVMProvider) Resources(_ context.Context) []func() resource.Resour
 }
 
 func (p *simpleVMProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		NewProjectDataSource, NewProjectsDataSource,
+		NewFlavorDataSource, NewFlavorsDataSource,
+		NewImageDataSource, NewImagesDataSource, NewSnapshotImagesDataSource,
+		NewVMsDataSource, NewVolumesDataSource,
+	}
 }

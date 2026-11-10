@@ -2,9 +2,11 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/deNBI/terraform-provider-simplevm/internal/fakeapi"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -133,4 +135,23 @@ func TestParsePollInterval(t *testing.T) {
 			t.Errorf("%q: expected error", bad)
 		}
 	}
+}
+
+// newFake starts a fake SimpleVM API and makes long-running operations poll fast.
+// Not usable with t.Parallel because of t.Setenv.
+func newFake(t *testing.T, opts ...fakeapi.Option) *fakeapi.Server {
+	t.Helper()
+	t.Setenv("SIMPLEVM_POLL_INTERVAL", "10ms")
+	return fakeapi.New(t, opts...)
+}
+
+// fakeProviderConfig returns a provider block pointing at the fake server.
+func fakeProviderConfig(s *fakeapi.Server) string {
+	return fmt.Sprintf(`
+provider "simplevm" {
+  endpoint   = %q
+  api_key    = %q
+  project_id = %d
+}
+`, s.URL(), fakeapi.APIKey, fakeapi.ProjectID)
 }
