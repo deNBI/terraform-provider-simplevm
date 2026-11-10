@@ -54,7 +54,7 @@ The API's `*/action/` endpoints are called from resource lifecycle methods, not 
 - VM create with a `research_environment` keeps polling until the playbook has finished; `playbook_failed` fails the create. If `power_state = "stopped"`, the VM is stopped only afterwards.
 - Read must not create drift from transient states: `power_state` is only taken from `vm_state` when that is `active` or `stopped`.
 - Read of an object that no longer exists removes it from state; the next plan proposes to create it.
-- Snapshots cannot be listed by ID or deleted. Create polls the snapshot images until the returned `openstack_id` (fallback: exact name) is `active`. Read removes the resource from state only if it was seen before and is now gone. This avoids duplicate, undeletable snapshots.
+- Snapshots cannot be listed by ID or deleted. Create polls the snapshot images until the returned `openstack_id` (fallback: exact name) is `active`. Because create only returns once the image is listed and `active`, the snapshot has been seen once by then. Read removes the resource from state whenever its ID is no longer in the project's snapshot-image list. Waiting in create (rather than treating a missing snapshot as "to be created") is what avoids duplicate, undeletable snapshots; there is no further protection, and a create that times out is tainted, so users must check the portal before re-applying.
 - Changes that alter what a VM or volume is use `RequiresReplace`. Only `power_state`, volume `name` and growing volume `size` update in place.
 
 ## Assumed request shapes
@@ -65,7 +65,7 @@ The SimpleVM OpenAPI schema does not document some request bodies. They are take
 - Volume action parameters `vm_uuid` (attach), `size` (extend), `new_name` (rename).
 - `DELETE /volumes/{uuid}/`, `GET /projects/by-api-key/`, `/vms/by-api-key/`.
 
-The real-API acceptance tests verify these shapes. If the API disagrees, fix the client and the fake together.
+The real-API acceptance tests exercise these shapes, but had not yet been run against the real API when this was written. If the API disagrees, fix the client and the fake together.
 
 ## Adding a resource
 

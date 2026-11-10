@@ -14,7 +14,7 @@ Looks up a VM image by name, including its research environment template (if any
 
 ```terraform
 data "simplevm_image" "ubuntu" {
-  name = "Ubuntu 22.04"
+  name = "Ubuntu-22.04"
 }
 ```
 
@@ -23,7 +23,7 @@ data "simplevm_image" "ubuntu" {
 
 ### Required
 
-- `name` (String) Exact image name, for example `Ubuntu 22.04`.
+- `name` (String) Exact image name, for example `Ubuntu-22.04`.
 
 ### Optional
 

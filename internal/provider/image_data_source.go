@@ -95,7 +95,7 @@ func (d *imageDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 	attrs := imageComputedAttributes()
 	attrs["id"] = schema.StringAttribute{Computed: true, MarkdownDescription: "Identifier, the OpenStack ID of the image."}
 	attrs["project_id"] = projectIDAttribute
-	attrs["name"] = schema.StringAttribute{Required: true, MarkdownDescription: "Exact image name, for example `Ubuntu 22.04`."}
+	attrs["name"] = schema.StringAttribute{Required: true, MarkdownDescription: "Exact image name, for example `Ubuntu-22.04`."}
 	attrs["include_snapshots"] = schema.BoolAttribute{
 		Optional:            true,
 		MarkdownDescription: "Also search snapshot images. Regular images win on a name clash. Defaults to `false`.",

@@ -114,7 +114,7 @@ func New(t testing.TB, opts ...Option) *Server {
 			{ID: 2, Name: "de.NBI small", VCPUs: 2, RAM: 4096, RootDisk: 20, CreditsCostPerHour: 0.5},
 		},
 		images: []client.Image{
-			{OpenstackID: "img-ubuntu-2204", Name: "Ubuntu-22.04", Title: "Ubuntu 22.04", Status: "active",
+			{OpenstackID: "img-ubuntu-2204", Name: "Ubuntu-22.04", Title: "Ubuntu-22.04", Status: "active",
 				OSDistro: "ubuntu", OSVersion: "22.04", Tags: []string{"base"}, MinRAM: 1024, MinDisk: 10, CreatedAt: createdAt},
 			{OpenstackID: "img-rstudio-2204", Name: "RStudio-Ubuntu-22.04", Title: "RStudio", Status: "active",
 				OSDistro: "ubuntu", OSVersion: "22.04", Tags: []string{"rstudio"}, MinRAM: 4096, MinDisk: 20,

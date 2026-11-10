@@ -24,7 +24,7 @@ provider "simplevm" {} # SIMPLEVM_API_KEY and SIMPLEVM_PROJECT_ID from the envir
 resource "simplevm_vm" "analysis" {
   name   = "analysis"
   flavor = "de.NBI default"
-  image  = "Ubuntu 22.04"
+  image  = "Ubuntu-22.04"
 }
 ```
 

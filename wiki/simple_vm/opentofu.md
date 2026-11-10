@@ -78,7 +78,7 @@ terraform {
     resource "simplevm_vm" "hello" {
       name   = "hello-opentofu"
       flavor = "de.NBI default"
-      image  = "Ubuntu 22.04"
+      image  = "Ubuntu-22.04"
     }
 
     output "ip" {
@@ -132,7 +132,7 @@ The recipes build on each other. Each snippet goes into `main.tf` in addition to
 resource "simplevm_vm" "base" {
   name   = "analysis"
   flavor = "de.NBI default"
-  image  = "Ubuntu 22.04"
+  image  = "Ubuntu-22.04"
 }
 ```
 
@@ -214,7 +214,7 @@ Set `power_state` to `stopped` or `active`:
 resource "simplevm_vm" "base" {
   name        = "analysis"
   flavor      = "de.NBI default"
-  image       = "Ubuntu 22.04"
+  image       = "Ubuntu-22.04"
   power_state = "stopped"
 }
 ```
@@ -290,9 +290,9 @@ Run `tofu plan` afterwards and check that it shows no changes.
 
 **Can I add members to a VM or manage access?** No. The owner of the API key owns the VMs it creates. Share access in the portal.
 
-**Which things are out of scope?** Workshops, port and security group changes, rebooting and rescuing VMs.
+**Which things are out of scope?** Workshops, port opening, monitoring, credits, and one-off actions such as rebooting or rescuing VMs.
 
-**What does "own objects only" mean for my key?** With it switched on (the default), the key only reaches objects created with this key. VMs and volumes that others (or you, in the portal) created may not be visible to it, so importing them can fail. Switch it off only if you are sure you want the key to reach everything in the project.
+**What does "own objects only" mean for my key?** With it switched on (the default), you may not see objects created by others. Switch it off only if you are sure you want the key to reach everything in the project.
 
 **`tofu apply` stops with a timeout.** Creating machines can take longer than expected. Raise the limit, for example `timeouts = { create = "60m" }`. A VM or volume whose creation timed out is marked as tainted, so the next `tofu apply` deletes it and creates it again; check the plan. For snapshots, check the portal first (see above).
 
