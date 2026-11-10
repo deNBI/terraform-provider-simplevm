@@ -34,6 +34,7 @@ func (c *Client) CreateVolume(ctx context.Context, req CreateVolumeRequest) (*Vo
 }
 
 // DeleteVolume deletes a volume. Errors, including 404, are returned as is.
+// Endpoint assumed from the SimpleVM wiki (not in OpenAPI schema).
 func (c *Client) DeleteVolume(ctx context.Context, uuid string) error {
 	return c.do(ctx, http.MethodDelete, "volumes/"+url.PathEscape(uuid)+"/", nil, nil)
 }

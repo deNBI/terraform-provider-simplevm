@@ -20,7 +20,7 @@ func (c *Client) GetVM(ctx context.Context, uuid string) (*VM, error) {
 	}
 	for i := range vms {
 		if vms[i].UUID == uuid {
-			if vms[i].VMState == "deleted" {
+			if vms[i].VMState == VMStateDeleted {
 				return nil, ErrNotFound
 			}
 			return &vms[i], nil

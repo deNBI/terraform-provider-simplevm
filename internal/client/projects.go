@@ -15,6 +15,7 @@ func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 
 // GetProjectByAPIKey returns the project the API key is scoped to. The API may
 // answer with a single object or a one-element list.
+// Endpoint assumed from the SimpleVM wiki (not in OpenAPI schema).
 func (c *Client) GetProjectByAPIKey(ctx context.Context) (*Project, error) {
 	var raw json.RawMessage
 	if err := c.do(ctx, http.MethodGet, "projects/by-api-key/", nil, &raw); err != nil {

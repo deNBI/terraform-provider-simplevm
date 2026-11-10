@@ -14,6 +14,7 @@ const (
 
 // VM states.
 const (
+	VMStateDeleted  = "deleted"
 	VMStateActive   = "active"
 	VMStateStopped  = "stopped"
 	VMStateBuilding = "building"
@@ -33,7 +34,7 @@ var (
 	// VMFailureStates are terminal VM states indicating a failed operation.
 	VMFailureStates = []string{"error", "creation_failed"}
 	// VMGoneStates are VM states meaning the VM no longer exists for our purposes.
-	VMGoneStates = []string{"deleted", "soft-delete", "marked_as_deletable"}
+	VMGoneStates = []string{VMStateDeleted, "soft-delete", "marked_as_deletable"}
 	// PlaybookRunningTaskStates are task states while the research environment is provisioned.
 	PlaybookRunningTaskStates = []string{"prepare_playbook_build", "building_playbook", "checking_ssh_connection"}
 	// VolumeFailureStates are terminal volume statuses indicating failure.
