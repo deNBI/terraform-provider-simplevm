@@ -1,0 +1,125 @@
+package provider
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/deNBI/terraform-provider-simplevm/internal/client"
+	"github.com/deNBI/terraform-provider-simplevm/internal/fakeapi"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+)
+
+const volAddr = "simplevm_volume.test"
+
+func volumeConfig(s *fakeapi.Server, name string, size int) string {
+	return fakeProviderConfig(s) + fmt.Sprintf(`
+resource "simplevm_volume" "test" {
+  name = %q
+  size = %d
+}
+`, name, size)
+}
+
+// checkNoVolumes is a CheckDestroy verifying that the fake has no volumes left.
+func checkNoVolumes(t *testing.T, s *fakeapi.Server) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		vols, err := fakeClient(t, s).ListVolumes(context.Background())
+		if err != nil {
+			return err
+		}
+		// The fake's list endpoint does not advance volumes, so deleted ones
+		// stay listed until read again.
+		var left []client.Volume
+		for _, v := range vols {
+			if v.Status != client.VolumeStatusDeleted {
+				left = append(left, v)
+			}
+		}
+		if len(left) != 0 {
+			return fmt.Errorf("%d volume(s) left after destroy: %+v", len(left), left)
+		}
+		return nil
+	}
+}
+
+func TestVolume_Lifecycle(t *testing.T) {
+	s := newFake(t)
+	var id string
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVolumes(t, s),
+		Steps: []resource.TestStep{{
+			Config: volumeConfig(s, "data", 10),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				captureID(volAddr, &id),
+				resource.TestCheckResourceAttr(volAddr, "name", "data"),
+				resource.TestCheckResourceAttr(volAddr, "size", "10"),
+				resource.TestCheckResourceAttr(volAddr, "status", "available"),
+				resource.TestCheckResourceAttr(volAddr, "project_id", "1"),
+				resource.TestCheckResourceAttrSet(volAddr, "openstack_id"),
+			),
+		}, {
+			Config: volumeConfig(s, "data-renamed", 20),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(volAddr, plancheck.ResourceActionUpdate),
+			}},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(volAddr, "name", "data-renamed"),
+				resource.TestCheckResourceAttr(volAddr, "size", "20"),
+				resource.TestCheckResourceAttr(volAddr, "status", "available"),
+				func(st *terraform.State) error {
+					if got := st.RootModule().Resources[volAddr].Primary.ID; got != id {
+						return fmt.Errorf("volume was replaced: id %s -> %s", id, got)
+					}
+					return nil
+				},
+			),
+		}, {
+			ResourceName:            volAddr,
+			ImportState:             true,
+			ImportStateVerify:       true,
+			ImportStateVerifyIgnore: []string{"timeouts"},
+		}},
+	})
+}
+
+func TestVolume_ShrinkReplaces(t *testing.T) {
+	s := newFake(t)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVolumes(t, s),
+		Steps: []resource.TestStep{{
+			Config: volumeConfig(s, "data", 20),
+		}, {
+			Config: volumeConfig(s, "data", 10),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(volAddr, plancheck.ResourceActionReplace),
+			}},
+			Check: resource.TestCheckResourceAttr(volAddr, "size", "10"),
+		}},
+	})
+}
+
+func TestVolume_Disappears(t *testing.T) {
+	s := newFake(t)
+	var id string
+	cfg := volumeConfig(s, "data", 10)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVolumes(t, s),
+		Steps: []resource.TestStep{{
+			Config: cfg,
+			Check:  captureID(volAddr, &id),
+		}, {
+			PreConfig: func() { s.DeleteVolumeOutOfBand(id) },
+			Config:    cfg,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(volAddr, plancheck.ResourceActionCreate),
+			}},
+			Check: resource.TestCheckResourceAttr(volAddr, "status", "available"),
+		}},
+	})
+}
