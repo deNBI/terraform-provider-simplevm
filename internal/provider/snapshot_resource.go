@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -19,9 +20,18 @@ import (
 var _ resource.ResourceWithConfigure = &snapshotResource{}
 
 // Snapshots only have a create timeout; they cannot be deleted via the API.
-var snapshotTimeouts = opTimeouts{Create: 10 * time.Minute}
+// It is generous because a timed-out create cannot be retried cleanly.
+var snapshotTimeouts = opTimeouts{Create: 60 * time.Minute}
 
-const snapshotStatusActive = "active"
+const (
+	snapshotStatusActive = "active"
+	// snapshotStatusPending is the status of a snapshot SimpleVM has not
+	// listed yet.
+	snapshotStatusPending = "pending"
+	// snapshotSeenKey is the private state key set once the snapshot was seen
+	// in the snapshot images listing.
+	snapshotSeenKey = "seen"
+)
 
 // snapshotFailedStatuses are image statuses a snapshot never recovers from.
 var snapshotFailedStatuses = []string{"error", "killed", "deleted"}
@@ -52,10 +62,14 @@ func (r *snapshotResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "A snapshot image of a SimpleVM VM.\n\n" +
 			"Creating a snapshot is asynchronous: the provider polls the project's snapshot images until the " +
-			"new image is `active`; see `timeouts`. A snapshot that enters an error status fails the apply.\n\n" +
+			"new image is `active`; see `timeouts`. A snapshot that enters an error status fails the apply. " +
+			"A snapshot that is not `active` when the create timeout runs out only causes a warning: it is kept " +
+			"in state with its last observed `status` (`pending` while SimpleVM does not list it yet), may still " +
+			"complete, and is not created again by the next apply.\n\n" +
 			"**The SimpleVM API cannot delete snapshots.** Destroying this resource only removes the snapshot " +
 			"from state and emits a warning; delete the image in the SimpleVM portal under Images/Snapshots. " +
-			"If the image disappears outside Terraform, the resource is removed from state on the next refresh.\n\n" +
+			"If an image that was listed before disappears outside Terraform, the resource is removed from state " +
+			"on the next refresh; an image that was never listed is kept.\n\n" +
 			"Every argument replaces the snapshot when changed. **Import is not supported.**",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -161,6 +175,21 @@ func (r *snapshotResource) Create(ctx context.Context, req resource.CreateReques
 	if img != nil {
 		plan.ID = types.StringValue(img.OpenstackID)
 		applySnapshotImage(&plan, img)
+		resp.Diagnostics.Append(resp.Private.SetKey(ctx, snapshotSeenKey, []byte("true"))...)
+	}
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && plan.ID.ValueString() != "" {
+		// Failing would taint the snapshot and the next apply would create a
+		// duplicate that cannot be deleted through the API. Keep it instead.
+		if img == nil {
+			plan.Status = types.StringValue(snapshotStatusPending)
+		}
+		resp.Diagnostics.AddWarning("Snapshot not active yet",
+			fmt.Sprintf("Snapshot %q (%s) was created but did not become active within the create timeout (%s). "+
+				"It is kept in state and may still complete; the next refresh updates its status.",
+				plan.Name.ValueString(), plan.ID.ValueString(), err))
+		err = nil
+	}
+	if img != nil || err == nil {
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	}
 	if err != nil {
@@ -181,10 +210,18 @@ func (r *snapshotResource) Read(ctx context.Context, req resource.ReadRequest, r
 	}
 	i := slices.IndexFunc(imgs, func(im client.Image) bool { return im.OpenstackID == state.ID.ValueString() })
 	if i < 0 {
-		resp.State.RemoveResource(ctx)
+		seen, d := req.Private.GetKey(ctx, snapshotSeenKey)
+		resp.Diagnostics.Append(d...)
+		if len(seen) > 0 {
+			// Listed before, gone now: deleted outside Terraform.
+			resp.State.RemoveResource(ctx)
+		}
+		// Never listed: SimpleVM may not list it yet. Keep the state as is so
+		// that the next apply does not create a duplicate.
 		return
 	}
 	applySnapshotImage(&state, &imgs[i])
+	resp.Diagnostics.Append(resp.Private.SetKey(ctx, snapshotSeenKey, []byte("true"))...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 

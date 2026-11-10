@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/deNBI/terraform-provider-simplevm/internal/fakeapi"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -104,6 +106,97 @@ func TestSnapshot_TransientPollErrorsAreRetried(t *testing.T) {
 		Steps: []resource.TestStep{{
 			Config: fakeProviderConfig(s) + snapshotConfigBody,
 			Check:  resource.TestCheckResourceAttr(snapAddr, "status", "active"),
+		}},
+	})
+}
+
+// snapshotConfigWithTimeout is snapshotConfigBody with a snapshot create
+// timeout.
+func snapshotConfigWithTimeout(s *fakeapi.Server, create string) string {
+	return fakeProviderConfig(s) + strings.Replace(snapshotConfigBody, `description = "before upgrade"`,
+		fmt.Sprintf("description = \"before upgrade\"\n  timeouts = { create = %q }", create), 1)
+}
+
+func checkSnapshotPosts(s *fakeapi.Server, want int) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		if n := snapshotPosts(s); n != want {
+			return fmt.Errorf("POST snapshots/ count = %d, want %d", n, want)
+		}
+		return nil
+	}
+}
+
+// TestSnapshot_CreateTimeoutWarnsAndKeeps checks that a snapshot that is not
+// active within the create timeout is kept, not tainted: no duplicate is
+// created by the next apply.
+func TestSnapshot_CreateTimeoutWarnsAndKeeps(t *testing.T) {
+	s := newFake(t, fakeapi.WithSnapshotsStuckQueued())
+	cfg := snapshotConfigWithTimeout(s, "1s")
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: cfg,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrSet(snapAddr, "id"),
+				resource.TestCheckResourceAttr(snapAddr, "status", "queued"),
+			),
+		}, {
+			Config:           cfg,
+			PlanOnly:         true,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}},
+		}, {
+			Config: cfg,
+			Check:  checkSnapshotPosts(s, 1),
+		}},
+	})
+}
+
+// TestSnapshot_NeverListedIsKept checks that a snapshot SimpleVM has not
+// listed yet is neither an error nor removed from state on refresh.
+func TestSnapshot_NeverListedIsKept(t *testing.T) {
+	s := newFake(t, fakeapi.WithSnapshotsUnlisted())
+	cfg := snapshotConfigWithTimeout(s, "1s")
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: cfg,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttrSet(snapAddr, "id"),
+				resource.TestCheckResourceAttr(snapAddr, "status", "pending"),
+			),
+		}, {
+			Config: cfg,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(snapAddr, plancheck.ResourceActionNoop),
+			}},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(snapAddr, "status", "pending"),
+				checkSnapshotPosts(s, 1),
+			),
+		}},
+	})
+}
+
+// TestSnapshot_SeenThenGoneIsRemoved checks that a snapshot that was listed
+// and then deleted outside Terraform is removed from state.
+func TestSnapshot_SeenThenGoneIsRemoved(t *testing.T) {
+	s := newFake(t)
+	cfg := fakeProviderConfig(s) + snapshotConfigBody
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: cfg,
+		}, {
+			PreConfig:          func() { s.DeleteSnapshotOutOfBand("tf-snap") },
+			Config:             cfg,
+			PlanOnly:           true,
+			ExpectNonEmptyPlan: true,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PostApplyPostRefresh: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(snapAddr, plancheck.ResourceActionCreate),
+			}},
 		}},
 	})
 }

@@ -4,7 +4,7 @@ page_title: "simplevm_vm Resource - simplevm"
 subcategory: ""
 description: |-
   A SimpleVM virtual machine, optionally with a research environment.
-  Creating a VM is asynchronous: the provider polls SimpleVM until the VM is active and, with a research_environment, until its playbook has finished. A failed playbook (task_state = playbook_failed) fails the apply and the VM is tainted, so the next apply replaces it. Stopping, resuming and deleting are polled the same way; see timeouts.
+  Creating a VM is asynchronous: the provider polls SimpleVM until the VM is active and, with a research_environment, until its playbook has finished. A failed playbook (task_state = playbook_failed) fails the apply and the VM is tainted, so the next apply replaces it. Stopping, resuming and deleting are polled the same way; see timeouts. If a VM created with power_state = "stopped" cannot be stopped, the apply only warns: the VM is kept and the next plan shows the stop as an in-place update.
   power_state only takes active or stopped and is the only argument that can change in place; every other argument replaces the VM. While the VM is in a transient state (for example building or rebooting) a refresh does not report power_state drift.
   Importing does not restore research_environment, because SimpleVM does not report it. Add lifecycle { ignore_changes = [research_environment] } to an imported research environment VM to keep it from being replaced.
 ---
@@ -13,7 +13,7 @@ description: |-
 
 A SimpleVM virtual machine, optionally with a research environment.
 
-Creating a VM is asynchronous: the provider polls SimpleVM until the VM is `active` and, with a `research_environment`, until its playbook has finished. A failed playbook (`task_state = playbook_failed`) fails the apply and the VM is tainted, so the next apply replaces it. Stopping, resuming and deleting are polled the same way; see `timeouts`.
+Creating a VM is asynchronous: the provider polls SimpleVM until the VM is `active` and, with a `research_environment`, until its playbook has finished. A failed playbook (`task_state = playbook_failed`) fails the apply and the VM is tainted, so the next apply replaces it. Stopping, resuming and deleting are polled the same way; see `timeouts`. If a VM created with `power_state = "stopped"` cannot be stopped, the apply only warns: the VM is kept and the next plan shows the stop as an in-place update.
 
 `power_state` only takes `active` or `stopped` and is the only argument that can change in place; every other argument replaces the VM. While the VM is in a transient state (for example `building` or `rebooting`) a refresh does not report `power_state` drift.
 
@@ -58,7 +58,7 @@ resource "simplevm_vm" "rstudio" {
 
 - `flavor` (String) Name of the flavor, for example `de.NBI default`; see the `simplevm_flavors` data source. Changing it replaces the VM.
 - `image` (String) Name of the base image or snapshot image; see the `simplevm_images` and `simplevm_snapshot_images` data sources. Changing it replaces the VM.
-- `name` (String) Name of the VM. Changing it replaces the VM.
+- `name` (String) Name of the VM, 1 to 100 characters. Changing it replaces the VM.
 
 ### Optional
 

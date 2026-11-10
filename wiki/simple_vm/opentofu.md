@@ -179,7 +179,7 @@ output "images" {
 `tofu apply` waits until the research environment is installed, not only until the VM runs. That takes longer, so give it a generous `create` timeout as above. If the installation fails, the VM is marked as tainted: the next `tofu apply` deletes it and starts over.
 
 !!! info "Timeouts"
-    Timeouts are set with `timeouts = { create = "45m" }`. Defaults are 30 minutes for creating a VM, 15 minutes for changing or deleting it and 10 minutes for volume and snapshot operations.
+    Timeouts are set with `timeouts = { create = "45m" }`. Defaults are 30 minutes for creating a VM, 15 minutes for changing or deleting it, 10 minutes for volume operations and 60 minutes for creating a snapshot.
 
 ### Add a volume
 
@@ -236,8 +236,10 @@ resource "simplevm_snapshot" "before_upgrade" {
 !!! warning "Destroying a snapshot resource does not delete the snapshot"
     SimpleVM offers no way to delete snapshots through the API. `tofu destroy` only forgets the snapshot and prints a warning. Delete the snapshot yourself in the portal under Images/Snapshots.
 
-!!! warning "If creating a snapshot times out"
-    If `tofu apply` reports a timeout while creating a snapshot, the snapshot may still be created in the background. Check the portal under Images/Snapshots **before** you apply again. A second apply would create another snapshot that you cannot remove through OpenTofu.
+!!! warning "If creating a snapshot takes too long"
+    If the snapshot is not ready within the `create` timeout (60 minutes by default), `tofu apply` finishes with a warning instead of an error. The snapshot stays in your state with its last known `status` (`pending` if SimpleVM did not list it yet) and usually completes in the background; the next `tofu plan` or `tofu apply` updates the status and does not create a second snapshot.
+
+    If creating a snapshot fails with an **error**, OpenTofu marks it as tainted and the next apply creates a new snapshot. Check the portal under Images/Snapshots before you apply again: you cannot remove snapshots through OpenTofu.
 
 Snapshots cannot be imported.
 
@@ -294,7 +296,7 @@ Run `tofu plan` afterwards and check that it shows no changes.
 
 **What does "own objects only" mean for my key?** With it switched on (the default), you may not see objects created by others. Switch it off only if you are sure you want the key to reach everything in the project.
 
-**`tofu apply` stops with a timeout.** Creating machines can take longer than expected. Raise the limit, for example `timeouts = { create = "60m" }`. A VM or volume whose creation timed out is marked as tainted, so the next `tofu apply` deletes it and creates it again; check the plan. For snapshots, check the portal first (see above).
+**`tofu apply` stops with a timeout.** Creating machines can take longer than expected. Raise the limit, for example `timeouts = { create = "60m" }`. A VM or volume whose creation timed out is marked as tainted, so the next `tofu apply` deletes it and creates it again; check the plan. A snapshot that times out is kept instead (see above).
 
 **I get "forbidden" or "unauthorized".** The key is wrong, expired, belongs to another project or lacks a scope. Create a new key with the scopes listed under Prerequisites.
 

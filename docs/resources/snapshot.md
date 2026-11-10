@@ -4,8 +4,8 @@ page_title: "simplevm_snapshot Resource - simplevm"
 subcategory: ""
 description: |-
   A snapshot image of a SimpleVM VM.
-  Creating a snapshot is asynchronous: the provider polls the project's snapshot images until the new image is active; see timeouts. A snapshot that enters an error status fails the apply.
-  The SimpleVM API cannot delete snapshots. Destroying this resource only removes the snapshot from state and emits a warning; delete the image in the SimpleVM portal under Images/Snapshots. If the image disappears outside Terraform, the resource is removed from state on the next refresh.
+  Creating a snapshot is asynchronous: the provider polls the project's snapshot images until the new image is active; see timeouts. A snapshot that enters an error status fails the apply. A snapshot that is not active when the create timeout runs out only causes a warning: it is kept in state with its last observed status (pending while SimpleVM does not list it yet), may still complete, and is not created again by the next apply.
+  The SimpleVM API cannot delete snapshots. Destroying this resource only removes the snapshot from state and emits a warning; delete the image in the SimpleVM portal under Images/Snapshots. If an image that was listed before disappears outside Terraform, the resource is removed from state on the next refresh; an image that was never listed is kept.
   Every argument replaces the snapshot when changed. Import is not supported.
 ---
 
@@ -13,9 +13,9 @@ description: |-
 
 A snapshot image of a SimpleVM VM.
 
-Creating a snapshot is asynchronous: the provider polls the project's snapshot images until the new image is `active`; see `timeouts`. A snapshot that enters an error status fails the apply.
+Creating a snapshot is asynchronous: the provider polls the project's snapshot images until the new image is `active`; see `timeouts`. A snapshot that enters an error status fails the apply. A snapshot that is not `active` when the create timeout runs out only causes a warning: it is kept in state with its last observed `status` (`pending` while SimpleVM does not list it yet), may still complete, and is not created again by the next apply.
 
-**The SimpleVM API cannot delete snapshots.** Destroying this resource only removes the snapshot from state and emits a warning; delete the image in the SimpleVM portal under Images/Snapshots. If the image disappears outside Terraform, the resource is removed from state on the next refresh.
+**The SimpleVM API cannot delete snapshots.** Destroying this resource only removes the snapshot from state and emits a warning; delete the image in the SimpleVM portal under Images/Snapshots. If an image that was listed before disappears outside Terraform, the resource is removed from state on the next refresh; an image that was never listed is kept.
 
 Every argument replaces the snapshot when changed. **Import is not supported.**
 
@@ -56,4 +56,4 @@ resource "simplevm_snapshot" "before_upgrade" {
 
 Optional:
 
-- `create` (String) Timeout for the create operation (default `10m`). A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
+- `create` (String) Timeout for the create operation (default `1h0m`). A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).

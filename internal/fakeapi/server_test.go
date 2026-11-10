@@ -457,3 +457,38 @@ func TestFake_IdleTaskStateAndPlaybookDoneNeverReported(t *testing.T) {
 		t.Fatalf("stopped VM task_state = %v, want the idle state", vm.TaskState)
 	}
 }
+
+func TestFake_SnapshotOptions(t *testing.T) {
+	ctx := context.Background()
+	snapshot := func(t *testing.T, srv *fakeapi.Server, c *client.Client) {
+		t.Helper()
+		uuid := createVM(t, c, "vm1", "Ubuntu-22.04", nil)
+		waitVM(t, c, uuid, isActive)
+		if _, err := c.CreateSnapshot(ctx, client.CreateSnapshotRequest{Name: "s", VMUUID: uuid}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("stuck queued", func(t *testing.T) {
+		srv := fakeapi.New(t, fakeapi.WithSnapshotsStuckQueued())
+		c := newClient(t, srv)
+		snapshot(t, srv, c)
+		for range 3 {
+			imgs, err := c.ListSnapshotImages(ctx, fakeapi.ProjectID)
+			if err != nil || len(imgs) != 1 || imgs[0].Status != "queued" {
+				t.Fatalf("imgs=%+v err=%v", imgs, err)
+			}
+		}
+		srv.DeleteSnapshotOutOfBand("s")
+		if imgs, _ := c.ListSnapshotImages(ctx, fakeapi.ProjectID); len(imgs) != 0 {
+			t.Fatalf("snapshot not deleted: %+v", imgs)
+		}
+	})
+	t.Run("unlisted", func(t *testing.T) {
+		srv := fakeapi.New(t, fakeapi.WithSnapshotsUnlisted())
+		c := newClient(t, srv)
+		snapshot(t, srv, c)
+		if imgs, err := c.ListSnapshotImages(ctx, fakeapi.ProjectID); err != nil || len(imgs) != 0 {
+			t.Fatalf("imgs=%+v err=%v", imgs, err)
+		}
+	})
+}

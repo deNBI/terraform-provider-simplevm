@@ -49,12 +49,16 @@ The API's `*/action/` endpoints are called from resource lifecycle methods, not 
 
 ## Polling and state rules
 
-- Operations are asynchronous. Resources call `client.WaitFor` with a poll interval (default `10s`, override with `SIMPLEVM_POLL_INTERVAL`, for development and tests only) until a terminal state or the timeout. Timeouts are attributes (`timeouts = { create = "45m" }`). Defaults: VM create 30m, VM update/delete 15m, volume, attachment and snapshot operations 10m.
-- A resource is saved to state as soon as the API returns its ID, before waiting, so a failed or timed-out wait leaves a tainted resource instead of an orphan.
-- VM create with a `research_environment` keeps polling until the playbook has finished; `playbook_failed` fails the create. If `power_state = "stopped"`, the VM is stopped only afterwards.
+- Operations are asynchronous. Resources call `client.WaitFor` with a poll interval (default `10s`, override with `SIMPLEVM_POLL_INTERVAL`, for development and tests only) until a terminal state or the timeout. Timeouts are attributes (`timeouts = { create = "45m" }`). Defaults: VM create 30m, VM update/delete 15m, volume and attachment operations 10m, snapshot create 60m.
+- While polling, transient errors (`client.IsTransient`: HTTP 5xx, 429 and network errors, but not context cancellation or deadline expiry) are recorded as the observed status and polling continues; more than five in a row fail the wait with the last error. Other 4xx answers, including 401/403, fail at once. The client itself does not retry.
+- A resource is saved to state as soon as the API returns its ID, before waiting, so a failed or timed-out wait leaves a tainted resource instead of an orphan. A create response without ID is an error and nothing is saved.
+- VM create with a `research_environment` keeps polling until `vm_state` is `active`, `task_state` is none of `prepare_playbook_build`, `building_playbook`, `checking_ssh_connection`, and either every `playbook[].done` is true or `task_state` is `playbook_successful`; `playbook_failed` fails the create. If `power_state = "stopped"`, the VM is stopped only afterwards. If that stop fails, the create only warns: the VM is saved (not tainted) with the planned `power_state`, and the next refresh and plan show an in-place stop.
+- A stop or resume is complete when `vm_state` is the target and `task_state` is not a transition state (`client.VMBusyTaskStates`, for example `powering-off`); idle task states such as `playbook_successful` do not block. An update that changes only `timeouts` sends no stop/resume.
 - Read must not create drift from transient states: `power_state` is only taken from `vm_state` when that is `active` or `stopped`.
 - Read of an object that no longer exists removes it from state; the next plan proposes to create it.
-- Snapshots cannot be listed by ID or deleted. Create polls the snapshot images until the returned `openstack_id` (fallback: exact name) is `active`. Because create only returns once the image is listed and `active`, the snapshot has been seen once by then. Read removes the resource from state whenever its ID is no longer in the project's snapshot-image list. Waiting in create (rather than treating a missing snapshot as "to be created") is what avoids duplicate, undeletable snapshots; there is no further protection, and a create that times out is tainted, so users must check the portal before re-applying.
+- Snapshots cannot be read by ID or deleted. Create polls the snapshot images until the returned `openstack_id` (fallback: exact name) is `active`. Each time the snapshot is found in the snapshot-image list (in create or read), the provider private state key `seen` is set.
+- Once `POST /snapshots/` returned an ID, a create that runs out of time is a warning, not an error: the snapshot is kept in state (not tainted) with its last observed `status`, or `pending` if it was never listed, because it may still complete and a re-create would leave an undeletable duplicate. A snapshot that enters a failure status (`error`, `killed`, `deleted`) still fails the create.
+- Read removes a snapshot from state only when it is missing from the list **and** was `seen` before; a snapshot that was never listed is kept as is. This reduces the risk of duplicates, but does not rule them out: a snapshot whose create failed with an error is tainted, and the next apply creates a new one.
 - Changes that alter what a VM or volume is use `RequiresReplace`. Only `power_state`, volume `name` and growing volume `size` update in place.
 
 ## Assumed request shapes
@@ -63,7 +67,7 @@ The SimpleVM OpenAPI schema does not document some request bodies. They are take
 
 - `POST /vms/` body: `project_id`, `image_name`, `flavor_name`, `vm_name`, optional `research_environment_backend { template, user_path, create_only }`.
 - Volume action parameters `vm_uuid` (attach), `size` (extend), `new_name` (rename).
-- `DELETE /volumes/{uuid}/`, `GET /projects/by-api-key/`, `/vms/by-api-key/`.
+- `DELETE /volumes/{uuid}/`, `GET /projects/by-api-key/`.
 
 The real-API acceptance tests exercise these shapes, but had not yet been run against the real API when this was written. If the API disagrees, fix the client and the fake together.
 

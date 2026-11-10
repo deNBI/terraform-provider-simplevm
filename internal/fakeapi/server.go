@@ -57,6 +57,13 @@ func WithPlaybookDoneNeverReported() Option {
 	return func(s *Server) { s.playbookDoneNeverReported = true }
 }
 
+// WithSnapshotsStuckQueued makes snapshots stay "queued" forever.
+func WithSnapshotsStuckQueued() Option { return func(s *Server) { s.snapshotsStuck = true } }
+
+// WithSnapshotsUnlisted makes the snapshot images listing omit every
+// snapshot, as when SimpleVM lists a new snapshot late.
+func WithSnapshotsUnlisted() Option { return func(s *Server) { s.snapshotsUnlisted = true } }
+
 // WithForbidden makes every request answer 403.
 func WithForbidden() Option { return func(s *Server) { s.forbidden = true } }
 
@@ -132,6 +139,8 @@ type Server struct {
 	// idleTaskState replaces an empty task_state of active or stopped VMs.
 	idleTaskState             string
 	playbookDoneNeverReported bool
+	snapshotsStuck            bool
+	snapshotsUnlisted         bool
 	seq                       int64
 	vms                       map[string]*vmRec
 	vmOrder                   []string
@@ -204,6 +213,20 @@ func (s *Server) DeleteVolumeOutOfBand(uuid string) {
 		return
 	}
 	s.removeVolume(uuid)
+}
+
+// DeleteSnapshotOutOfBand removes the snapshot image with the given name as
+// if it was deleted in the UI.
+func (s *Server) DeleteSnapshotOutOfBand(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, sn := range s.snaps {
+		if sn.name == name {
+			s.snaps = append(s.snaps[:i], s.snaps[i+1:]...)
+			return
+		}
+	}
+	s.t.Errorf("fakeapi: DeleteSnapshotOutOfBand: unknown snapshot %q", name)
 }
 
 // SetVMState forces a VM into the given states and cancels its pending steps.
@@ -350,6 +373,9 @@ func (s *Server) volumeJSON(v *volRec) client.Volume {
 
 func (s *Server) snapshotImages() []client.Image {
 	out := []client.Image{}
+	if s.snapshotsUnlisted {
+		return out
+	}
 	for _, sn := range s.snaps {
 		if sn.activate {
 			sn.status, sn.activate = "active", false
@@ -773,7 +799,7 @@ func (s *Server) createSnapshot(body []byte) response {
 		return detail(http.StatusBadRequest, "name must not be empty.")
 	}
 	_, osID := s.nextID("os-snap")
-	s.snaps = append(s.snaps, &snapRec{name: req.Name, description: req.Description, openstackID: osID, status: "queued", activate: true})
+	s.snaps = append(s.snaps, &snapRec{name: req.Name, description: req.Description, openstackID: osID, status: "queued", activate: !s.snapshotsStuck})
 	return response{http.StatusCreated, client.Snapshot{
 		Name: req.Name, OpenstackID: osID, Status: "queued", Description: req.Description, CreatedAt: createdAt, ProjectID: ProjectID,
 	}}
