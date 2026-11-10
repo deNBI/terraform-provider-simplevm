@@ -5,7 +5,7 @@ subcategory: ""
 description: |-
   A SimpleVM block storage volume.
   Creating, growing and deleting a volume are asynchronous: the provider polls SimpleVM until the volume is available (or gone, for delete); see timeouts. A volume that enters an error status fails the apply.
-  name and size change in place: a rename is immediate and a larger size extends the volume. Shrinking a volume is not possible in OpenStack, so a smaller size replaces the volume and destroys its data. Every other argument replaces the volume. Attach a volume to a VM with simplevm_volume_attachment.
+  name and size change in place: a rename is polled until SimpleVM reports the new name, and a larger size extends the volume. Shrinking a volume is not possible in OpenStack, so a smaller size replaces the volume and destroys its data. Every other argument replaces the volume. Attach a volume to a VM with simplevm_volume_attachment.
   The extend and rename request shapes are assumed from the SimpleVM wiki.
 ---
 
@@ -15,7 +15,7 @@ A SimpleVM block storage volume.
 
 Creating, growing and deleting a volume are asynchronous: the provider polls SimpleVM until the volume is `available` (or gone, for delete); see `timeouts`. A volume that enters an error status fails the apply.
 
-`name` and `size` change in place: a rename is immediate and a larger `size` extends the volume. Shrinking a volume is not possible in OpenStack, so a smaller `size` replaces the volume and destroys its data. Every other argument replaces the volume. Attach a volume to a VM with `simplevm_volume_attachment`.
+`name` and `size` change in place: a rename is polled until SimpleVM reports the new name, and a larger `size` extends the volume. Shrinking a volume is not possible in OpenStack, so a smaller `size` replaces the volume and destroys its data. Every other argument replaces the volume. Attach a volume to a VM with `simplevm_volume_attachment`.
 
 The `extend` and `rename` request shapes are assumed from the SimpleVM wiki.
 
@@ -33,7 +33,7 @@ resource "simplevm_volume" "data" {
 
 ### Required
 
-- `name` (String) Name of the volume. Changing it renames the volume in place.
+- `name` (String) Name of the volume, 1 to 32 characters. Changing it renames the volume in place.
 - `size` (Number) Size of the volume in GiB. Increasing it extends the volume in place. Shrinking a volume replaces it (data loss).
 
 ### Optional

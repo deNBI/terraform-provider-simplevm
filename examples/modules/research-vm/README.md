@@ -24,7 +24,7 @@ output "url" {
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `name` | string | required | Name of the VM; the volume is named `<name>-data`. |
+| `name` | string | required | Name of the VM, 1 to 27 characters; the volume is named `<name>-data`, and SimpleVM allows at most 32 characters for volume names. |
 | `project_id` | number | `null` | SimpleVM project ID; defaults to the provider's. |
 | `flavor` | string | required | Flavor name. |
 | `image` | string | required | Base image or snapshot image name. |

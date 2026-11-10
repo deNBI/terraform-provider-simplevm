@@ -9,6 +9,7 @@ import (
 	"github.com/deNBI/terraform-provider-simplevm/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -62,7 +63,7 @@ func (r *volumeResource) Schema(ctx context.Context, _ resource.SchemaRequest, r
 			"Creating, growing and deleting a volume are asynchronous: the provider polls SimpleVM until the " +
 			"volume is `available` (or gone, for delete); see `timeouts`. A volume that enters an error " +
 			"status fails the apply.\n\n" +
-			"`name` and `size` change in place: a rename is immediate and a larger `size` extends the volume. " +
+			"`name` and `size` change in place: a rename is polled until SimpleVM reports the new name, and a larger `size` extends the volume. " +
 			"Shrinking a volume is not possible in OpenStack, so a smaller `size` replaces the volume and " +
 			"destroys its data. Every other argument replaces the volume. Attach a volume to a VM with " +
 			"`simplevm_volume_attachment`.\n\n" +
@@ -82,7 +83,8 @@ func (r *volumeResource) Schema(ctx context.Context, _ resource.SchemaRequest, r
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "Name of the volume. Changing it renames the volume in place.",
+				MarkdownDescription: "Name of the volume, 1 to 32 characters. Changing it renames the volume in place.",
+				Validators:          []validator.String{stringvalidator.LengthBetween(1, 32)},
 			},
 			"size": schema.Int64Attribute{
 				Required: true,
@@ -160,6 +162,11 @@ func (r *volumeResource) Create(ctx context.Context, req resource.CreateRequest,
 		resp.Diagnostics.AddError("Unable to create volume", err.Error())
 		return
 	}
+	if created.UUID == "" {
+		resp.Diagnostics.AddError("Unable to create volume",
+			fmt.Sprintf("SimpleVM API returned no volume uuid. Check the SimpleVM portal for a volume named %q and import or delete it.", plan.Name.ValueString()))
+		return
+	}
 
 	// Save the volume right away so that a failed wait leaves a tainted
 	// resource Terraform can destroy, instead of an orphaned volume.
@@ -221,8 +228,7 @@ func (r *volumeResource) Update(ctx context.Context, req resource.UpdateRequest,
 	uuid := plan.ID.ValueString()
 	vol, err := r.pd.Client.GetVolume(ctx, uuid)
 	if err != nil {
-		// Keep the prior state rather than the plan, which has unknown values.
-		resp.State.Raw = req.State.Raw
+		// resp.State starts out as the prior state, which is kept.
 		resp.Diagnostics.AddError("Unable to read volume "+uuid, err.Error())
 		return
 	}
@@ -230,7 +236,6 @@ func (r *volumeResource) Update(ctx context.Context, req resource.UpdateRequest,
 	target := vol.Status
 	extend := plan.Size.ValueInt64() > state.Size.ValueInt64()
 	if extend && target != client.VolumeStatusAvailable && target != client.VolumeStatusInUse {
-		resp.State.Raw = req.State.Raw
 		resp.Diagnostics.AddError("Unable to extend volume "+uuid,
 			fmt.Sprintf("volume has status %q; it must be %q or %q to be extended", target, client.VolumeStatusAvailable, client.VolumeStatusInUse))
 		return
@@ -245,15 +250,22 @@ func (r *volumeResource) Update(ctx context.Context, req resource.UpdateRequest,
 		resp.Diagnostics.AddError(summary, err.Error())
 	}
 
-	if plan.Name.ValueString() != state.Name.ValueString() {
-		renamed, err := r.pd.Client.VolumeAction(ctx, uuid, client.VolumeActionRequest{
-			OSAction: client.VolumeActionRename, NewName: plan.Name.ValueString(),
-		})
-		if err != nil {
+	if name := plan.Name.ValueString(); name != state.Name.ValueString() {
+		if _, err := r.pd.Client.VolumeAction(ctx, uuid, client.VolumeActionRequest{
+			OSAction: client.VolumeActionRename, NewName: name,
+		}); err != nil {
 			fail("Unable to rename volume "+uuid, err)
 			return
 		}
-		vol = renamed
+		// The action response may predate the rename: read it back.
+		renamed, err := r.waitVolume(ctx, uuid, untilVolumeName(name))
+		if renamed != nil {
+			vol = renamed
+		}
+		if err != nil {
+			fail("Error waiting for volume "+uuid+" to be renamed", err)
+			return
+		}
 	}
 	if extend {
 		if _, err := r.pd.Client.VolumeAction(ctx, uuid, client.VolumeActionRequest{
@@ -342,6 +354,19 @@ func untilVolume(target string, minSize int64) func(*client.Volume) (bool, error
 			return false, fmt.Errorf("volume entered failure state (status=%s)", v.Status)
 		}
 		return v.Status == target && v.Storage >= minSize, nil
+	}
+}
+
+// untilVolumeName is done once the volume reports the given name.
+func untilVolumeName(name string) func(*client.Volume) (bool, error) {
+	return func(v *client.Volume) (bool, error) {
+		switch {
+		case v == nil:
+			return false, fmt.Errorf("volume no longer exists")
+		case slices.Contains(client.VolumeFailureStates, v.Status):
+			return false, fmt.Errorf("volume entered failure state (status=%s)", v.Status)
+		}
+		return v.Name == name, nil
 	}
 }
 

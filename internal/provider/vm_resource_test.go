@@ -512,3 +512,26 @@ resource "simplevm_vm" "test" {
 		}},
 	})
 }
+
+// TestVM_NotFoundStateIsGone checks that vm_state not_found removes the VM
+// from state like a deleted one.
+func TestVM_NotFoundStateIsGone(t *testing.T) {
+	s := newFake(t)
+	var id string
+	cfg := vmConfig(s, "Ubuntu-22.04", "")
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: cfg,
+			Check:  captureID(vmAddr, &id),
+		}, {
+			PreConfig:          func() { s.SetVMState(id, "not_found", "") },
+			Config:             cfg,
+			PlanOnly:           true,
+			ExpectNonEmptyPlan: true,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PostApplyPostRefresh: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(vmAddr, plancheck.ResourceActionCreate),
+			}},
+		}},
+	})
+}

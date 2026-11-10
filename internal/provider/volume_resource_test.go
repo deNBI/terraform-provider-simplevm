@@ -3,6 +3,9 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/deNBI/terraform-provider-simplevm/internal/client"
@@ -143,5 +146,62 @@ func TestVolumeSizeShrinks(t *testing.T) {
 				t.Errorf("sizeShrinks = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestVolume_RenameOnly checks that a rename is read back from SimpleVM
+// rather than taken from the action response, which may predate it.
+func TestVolume_RenameOnly(t *testing.T) {
+	s := newFake(t)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVolumes(t, s),
+		Steps: []resource.TestStep{{
+			Config: volumeConfig(s, "data", 10),
+		}, {
+			Config: volumeConfig(s, "data-renamed", 10),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(volAddr, plancheck.ResourceActionUpdate),
+			}},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(volAddr, "name", "data-renamed"),
+				resource.TestCheckResourceAttr(volAddr, "size", "10"),
+				resource.TestCheckResourceAttr(volAddr, "status", "available"),
+			),
+		}},
+	})
+}
+
+// TestVolume_CreateWithoutUUIDFails checks that a create response without
+// uuid is an error and nothing with an empty id is saved.
+func TestVolume_CreateWithoutUUIDFails(t *testing.T) {
+	s := newFake(t)
+	s.RespondTo(http.MethodPost, "volumes/", 1, http.StatusCreated, map[string]string{"os_action": "create"})
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      volumeConfig(s, "data", 10),
+			ExpectError: regexp.MustCompile(`returned no volume uuid`),
+		}},
+	})
+}
+
+func TestVolume_NameLength(t *testing.T) {
+	s := newFake(t)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      volumeConfig(s, strings.Repeat("a", 33), 10),
+			PlanOnly:    true,
+			ExpectError: regexp.MustCompile(`string length must be between 1 and 32`),
+		}},
+	})
+}
+
+func TestUntilVolume_FailureStates(t *testing.T) {
+	for _, st := range []string{"error", "creation_failed", "error_extending", "deleting_failed", "error_deleting", "error_restoring"} {
+		if _, err := untilVolume(client.VolumeStatusAvailable, 0)(&client.Volume{Status: st}); err == nil {
+			t.Errorf("status %q: want failure", st)
+		}
 	}
 }

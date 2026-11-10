@@ -1,6 +1,11 @@
 variable "name" {
   type        = string
-  description = "Name of the VM. The volume, if any, is named \"<name>-data\"."
+  description = "Name of the VM, 1 to 27 characters. The volume, if any, is named \"<name>-data\" (volume names have at most 32 characters)."
+
+  validation {
+    condition     = length(var.name) >= 1 && length(var.name) <= 27
+    error_message = "name must have 1 to 27 characters, so that the volume name \"<name>-data\" fits SimpleVM's 32-character limit."
+  }
 }
 
 variable "project_id" {

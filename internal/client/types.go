@@ -40,7 +40,7 @@ var (
 	// VMFailureStates are terminal VM states indicating a failed operation.
 	VMFailureStates = []string{"error", "creation_failed"}
 	// VMGoneStates are VM states meaning the VM no longer exists for our purposes.
-	VMGoneStates = []string{VMStateDeleted, "soft-delete", "marked_as_deletable"}
+	VMGoneStates = []string{VMStateDeleted, "soft-delete", "marked_as_deletable", "not_found"}
 	// VMBusyTaskStates are (OpenStack) task states of a VM in transition; a
 	// power change is not complete while one of them is reported.
 	VMBusyTaskStates = []string{
@@ -54,7 +54,7 @@ var (
 	// PlaybookRunningTaskStates are task states while the research environment is provisioned.
 	PlaybookRunningTaskStates = []string{"prepare_playbook_build", "building_playbook", "checking_ssh_connection"}
 	// VolumeFailureStates are terminal volume statuses indicating failure.
-	VolumeFailureStates = []string{"error", "creation_failed", "error_extending"}
+	VolumeFailureStates = []string{"error", "creation_failed", "error_extending", "deleting_failed", "error_deleting", "error_restoring"}
 )
 
 // Project is a SimpleVM project the API key has access to.

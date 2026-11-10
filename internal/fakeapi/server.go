@@ -87,7 +87,8 @@ type vmRec struct {
 
 type volStep struct {
 	status  string
-	storage int64 // 0 keeps the current size
+	storage int64  // 0 keeps the current size
+	name    string // "" keeps the current name
 	gone    bool
 }
 
@@ -324,6 +325,9 @@ func (s *Server) advanceVolume(v *volRec) bool {
 	v.status = st.status
 	if st.storage != 0 {
 		v.storage = st.storage
+	}
+	if st.name != "" {
+		v.name = st.name
 	}
 	if st.status == client.VolumeStatusAvailable {
 		v.vmUUID, v.device = "", ""
@@ -777,7 +781,9 @@ func (s *Server) volumeAction(uuid string, body []byte) response {
 		if req.NewName == "" {
 			return detail(http.StatusBadRequest, "new_name must not be empty.")
 		}
-		v.name = req.NewName
+		// Asynchronous: the 202 body still shows the old name.
+		v.pending = append(v.pending, volStep{status: v.status, name: req.NewName})
+		return response{http.StatusAccepted, s.volumeJSON(v)}
 	default:
 		return detail(http.StatusBadRequest, "Unsupported os_action.")
 	}
