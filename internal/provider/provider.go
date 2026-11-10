@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
+	"github.com/deNBI/terraform-provider-simplevm/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -39,6 +41,17 @@ type resolvedConfig struct {
 	// HasProjectID is false when no default project was configured.
 	HasProjectID bool
 }
+
+// ProviderData is shared with resources and data sources via Configure.
+type ProviderData struct {
+	Client *client.Client
+	// DefaultProjectID is the provider-level project; 0 means unset.
+	DefaultProjectID int64
+	PollInterval     time.Duration
+}
+
+// DefaultPollInterval is how often long-running operations are polled.
+const DefaultPollInterval = 10 * time.Second
 
 // New returns a factory for the SimpleVM provider.
 func New(version string) func() fwprovider.Provider {
@@ -85,8 +98,34 @@ func (p *simpleVMProvider) Configure(ctx context.Context, req fwprovider.Configu
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	// The API client and ProviderData are introduced together with the client package.
-	_ = resolved
+
+	pollInterval := DefaultPollInterval
+	if v := os.Getenv("SIMPLEVM_POLL_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			resp.Diagnostics.AddError("Invalid SIMPLEVM_POLL_INTERVAL",
+				fmt.Sprintf("SIMPLEVM_POLL_INTERVAL must be a positive Go duration such as \"10s\", got %q.", v))
+			return
+		}
+		pollInterval = d
+	}
+
+	c, err := client.New(client.Config{
+		Endpoint:  resolved.Endpoint,
+		APIKey:    resolved.APIKey,
+		UserAgent: "terraform-provider-simplevm/" + p.version,
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to create SimpleVM client", err.Error())
+		return
+	}
+
+	data := &ProviderData{Client: c, PollInterval: pollInterval}
+	if resolved.HasProjectID {
+		data.DefaultProjectID = resolved.ProjectID
+	}
+	resp.ResourceData = data
+	resp.DataSourceData = data
 }
 
 // resolveConfig merges configuration values with environment variables
