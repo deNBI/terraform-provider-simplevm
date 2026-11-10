@@ -348,3 +348,167 @@ func TestVM_TooManyTransientPollErrorsFail(t *testing.T) {
 		}},
 	})
 }
+
+// TestVM_CreateStopFailureWarns checks that a VM that was created but could
+// not be stopped is kept (not tainted): the next plan stops it in place.
+func TestVM_CreateStopFailureWarns(t *testing.T) {
+	s := newFake(t)
+	s.FailRequests(http.MethodPost, "vms/*/action/", 1, http.StatusConflict)
+	cfg := vmConfig(s, "Ubuntu-22.04", `  power_state = "stopped"`)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: cfg,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(vmAddr, "vm_state", "active"),
+				resource.TestCheckResourceAttr(vmAddr, "power_state", "stopped"),
+			),
+			ExpectNonEmptyPlan: true,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PostApplyPostRefresh: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(vmAddr, plancheck.ResourceActionUpdate),
+			}},
+		}, {
+			Config: cfg,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(vmAddr, plancheck.ResourceActionUpdate),
+			}},
+			Check: resource.TestCheckResourceAttr(vmAddr, "vm_state", "stopped"),
+		}},
+	})
+}
+
+// TestVM_TimeoutsOnlyUpdateLeavesPowerAlone checks that changing only
+// timeouts sends no stop/resume, even while the VM is in a transient state.
+func TestVM_TimeoutsOnlyUpdateLeavesPowerAlone(t *testing.T) {
+	s := newFake(t)
+	var id string
+	var actions int
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: vmConfig(s, "Ubuntu-22.04", ""),
+			Check:  captureID(vmAddr, &id),
+		}, {
+			PreConfig: func() {
+				s.SetVMState(id, client.VMStateBuilding, "")
+				actions = actionRequests(s)
+			},
+			Config: vmConfig(s, "Ubuntu-22.04", `  timeouts = { update = "5m" }`),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(vmAddr, plancheck.ResourceActionUpdate),
+			}},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(vmAddr, "timeouts.update", "5m"),
+				resource.TestCheckResourceAttr(vmAddr, "power_state", "active"),
+				func(*terraform.State) error {
+					if n := actionRequests(s) - actions; n != 0 {
+						return fmt.Errorf("timeouts-only update sent %d VM action request(s)", n)
+					}
+					return nil
+				},
+			),
+		}},
+	})
+}
+
+// TestVM_PowerChangeWithIdleTaskState checks that an idle, non-empty
+// task_state does not keep a stop from completing.
+func TestVM_PowerChangeWithIdleTaskState(t *testing.T) {
+	s := newFake(t, fakeapi.WithIdleTaskState("checking_status"))
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: vmConfig(s, "Ubuntu-22.04", ""),
+		}, {
+			Config: vmConfig(s, "Ubuntu-22.04", `  power_state = "stopped"
+  timeouts = { update = "3s" }`),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(vmAddr, "vm_state", "stopped"),
+				resource.TestCheckResourceAttr(vmAddr, "task_state", "checking_status"),
+			),
+		}},
+	})
+}
+
+func TestUntilPower(t *testing.T) {
+	vm := func(state, task string) *client.VM {
+		v := &client.VM{VMState: state}
+		if task != "" {
+			v.TaskState = &task
+		}
+		return v
+	}
+	for name, tc := range map[string]struct {
+		vm   *client.VM
+		want bool
+	}{
+		"target, idle":              {vm(client.VMStateStopped, ""), true},
+		"target, checking_status":   {vm(client.VMStateStopped, "checking_status"), true},
+		"target, playbook_success":  {vm(client.VMStateStopped, client.TaskStatePlaybookSuccessful), true},
+		"target, powering-off":      {vm(client.VMStateStopped, "powering-off"), false},
+		"target, rebooting":         {vm(client.VMStateStopped, "rebooting"), false},
+		"other state, idle":         {vm(client.VMStateActive, ""), false},
+		"other state, powering-off": {vm(client.VMStateActive, "powering-off"), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := untilPower(client.VMStateStopped)(tc.vm)
+			if err != nil || got != tc.want {
+				t.Errorf("untilPower = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestVM_ResearchEnvironmentPlaybookSuccessful checks that task_state
+// playbook_successful completes the create even when playbook[].done is never
+// reported.
+func TestVM_ResearchEnvironmentPlaybookSuccessful(t *testing.T) {
+	s := newFake(t, fakeapi.WithIdleTaskState(client.TaskStatePlaybookSuccessful), fakeapi.WithPlaybookDoneNeverReported())
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: vmConfig(s, "RStudio-Ubuntu-22.04", `  research_environment = { template = "rstudio" }
+  timeouts = { create = "3s" }`),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(vmAddr, "vm_state", "active"),
+				resource.TestCheckResourceAttr(vmAddr, "task_state", client.TaskStatePlaybookSuccessful),
+			),
+		}},
+	})
+}
+
+// TestVM_CreateWithoutUUIDFails checks that a create response without uuid
+// is an error and nothing with an empty id is saved.
+func TestVM_CreateWithoutUUIDFails(t *testing.T) {
+	s := newFake(t)
+	s.RespondTo(http.MethodPost, "vms/", 1, http.StatusCreated, map[string]string{"os_action": "create", "vm_state": "planned"})
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      vmConfig(s, "Ubuntu-22.04", ""),
+			ExpectError: regexp.MustCompile(`returned no VM uuid`),
+		}},
+	})
+}
+
+func TestVM_NameLength(t *testing.T) {
+	s := newFake(t)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: fakeProviderConfig(s) + fmt.Sprintf(`
+resource "simplevm_vm" "test" {
+  name   = %q
+  flavor = "de.NBI default"
+  image  = "Ubuntu-22.04"
+}
+`, strings.Repeat("a", 101)),
+			PlanOnly:    true,
+			ExpectError: regexp.MustCompile(`string length must be between 1 and 100`),
+		}},
+	})
+}

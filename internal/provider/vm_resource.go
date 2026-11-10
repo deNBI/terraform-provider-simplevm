@@ -69,7 +69,9 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"Creating a VM is asynchronous: the provider polls SimpleVM until the VM is `active` and, " +
 			"with a `research_environment`, until its playbook has finished. A failed playbook " +
 			"(`task_state = playbook_failed`) fails the apply and the VM is tainted, so the next apply " +
-			"replaces it. Stopping, resuming and deleting are polled the same way; see `timeouts`.\n\n" +
+			"replaces it. Stopping, resuming and deleting are polled the same way; see `timeouts`. " +
+			"If a VM created with `power_state = \"stopped\"` cannot be stopped, the apply only warns: " +
+			"the VM is kept and the next plan shows the stop as an in-place update.\n\n" +
 			"`power_state` only takes `active` or `stopped` and is the only argument that can change " +
 			"in place; every other argument replaces the VM. While the VM is in a transient state " +
 			"(for example `building` or `rebooting`) a refresh does not report `power_state` drift.\n\n" +
@@ -91,8 +93,9 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "Name of the VM. Changing it replaces the VM.",
+				MarkdownDescription: "Name of the VM, 1 to 100 characters. Changing it replaces the VM.",
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Validators:          []validator.String{stringvalidator.LengthBetween(1, 100)},
 			},
 			"flavor": schema.StringAttribute{
 				Required:            true,
@@ -200,6 +203,11 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		resp.Diagnostics.AddError("Unable to create VM", err.Error())
 		return
 	}
+	if created.UUID == "" {
+		resp.Diagnostics.AddError("Unable to create VM",
+			fmt.Sprintf("SimpleVM API returned no VM uuid. Check the SimpleVM portal for a VM named %q and import or delete it.", plan.Name.ValueString()))
+		return
+	}
 
 	// Save the VM right away so that a failed wait leaves a tainted resource
 	// Terraform can destroy, instead of an orphaned VM.
@@ -214,16 +222,30 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	vm, err := r.waitVM(ctx, created.UUID, untilCreated(resenv != nil))
-	if err == nil && plan.PowerState.ValueString() == client.VMStateStopped {
-		vm, err = r.setPower(ctx, vm, client.VMStateStopped)
-	}
-	if vm != nil {
-		applyVM(&plan, vm)
-		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	}
 	if err != nil {
+		if vm != nil {
+			applyVM(&plan, vm)
+			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+		}
 		resp.Diagnostics.AddError("Error waiting for VM "+created.UUID, err.Error())
+		return
 	}
+	power := plan.PowerState
+	if power.ValueString() == client.VMStateStopped {
+		// The VM itself is fine: a failed stop must not taint it. The next
+		// refresh reads power_state from vm_state, so the plan shows a stop.
+		stopped, err := r.setPower(ctx, vm, client.VMStateStopped)
+		if stopped != nil {
+			vm = stopped
+		}
+		if err != nil {
+			resp.Diagnostics.AddWarning("VM created but not stopped",
+				fmt.Sprintf("VM %s was created but could not be stopped: %s. The next plan will show an in-place stop.", created.UUID, err))
+		}
+	}
+	applyVM(&plan, vm)
+	plan.PowerState = power // the planned value; refresh reports the real one
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -246,8 +268,9 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 }
 
 func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan vmModel
+	var plan, state vmModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -262,14 +285,22 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 	uuid := plan.ID.ValueString()
 	vm, err := r.pd.Client.GetVM(ctx, uuid)
 	if err != nil {
-		// Keep the prior state rather than the plan, which has unknown values.
-		resp.State.Raw = req.State.Raw
+		// resp.State starts out as the prior state, which is kept.
 		resp.Diagnostics.AddError("Unable to read VM "+uuid, err.Error())
 		return
 	}
-	vm, err = r.setPower(ctx, vm, plan.PowerState.ValueString())
+	// Everything but power_state and timeouts replaces the VM, so with an
+	// unchanged power_state only timeouts changed: leave the VM alone, even
+	// when it is in a transient state.
+	if plan.PowerState.ValueString() != state.PowerState.ValueString() {
+		vm, err = r.setPower(ctx, vm, plan.PowerState.ValueString())
+	}
 	if vm != nil {
+		power := plan.PowerState
 		applyVM(&plan, vm)
+		if err == nil {
+			plan.PowerState = power // the planned value; refresh reports the real one
+		}
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	}
 	if err != nil {
@@ -387,18 +418,23 @@ func untilCreated(resenv bool) func(*client.VM) (bool, error) {
 		if vm.VMState != client.VMStateActive {
 			return false, nil
 		}
-		return !resenv || (!slices.Contains(client.PlaybookRunningTaskStates, ts) && vm.Playbook.AllDone()), nil
+		if !resenv {
+			return true, nil
+		}
+		return !slices.Contains(client.PlaybookRunningTaskStates, ts) &&
+			(vm.Playbook.AllDone() || ts == client.TaskStatePlaybookSuccessful), nil
 	}
 }
 
-// untilPower is done once the VM has reached the target state and no task is
-// running.
+// untilPower is done once the VM has reached the target state and is not
+// busy with a transition (see client.VMBusyTaskStates). Idle task states
+// such as playbook_successful do not block.
 func untilPower(target string) func(*client.VM) (bool, error) {
 	return func(vm *client.VM) (bool, error) {
 		if err := vmBroken(vm); err != nil {
 			return false, err
 		}
-		return vm.VMState == target && taskState(vm) == "", nil
+		return vm.VMState == target && !slices.Contains(client.VMBusyTaskStates, taskState(vm)), nil
 	}
 }
 

@@ -438,3 +438,22 @@ func TestFake_FailRequestsAndRespondTo(t *testing.T) {
 		t.Fatalf("canned create must not create a VM, have %d", len(vms))
 	}
 }
+
+func TestFake_IdleTaskStateAndPlaybookDoneNeverReported(t *testing.T) {
+	srv := fakeapi.New(t, fakeapi.WithIdleTaskState(client.TaskStatePlaybookSuccessful), fakeapi.WithPlaybookDoneNeverReported())
+	c := newClient(t, srv)
+	uuid := createVM(t, c, "re", "RStudio-Ubuntu-22.04", &client.ResearchEnvironmentBackend{Template: "rstudio"})
+	vm := waitVM(t, c, uuid, func(vm *client.VM) bool {
+		return vm.TaskState != nil && *vm.TaskState == client.TaskStatePlaybookSuccessful
+	})
+	if vm.VMState != client.VMStateActive || vm.Playbook.AllDone() {
+		t.Fatalf("unexpected VM: %+v", vm)
+	}
+	if _, err := c.VMAction(context.Background(), uuid, client.VMActionStop); err != nil {
+		t.Fatal(err)
+	}
+	vm = waitVM(t, c, uuid, func(vm *client.VM) bool { return vm.VMState == client.VMStateStopped })
+	if vm.TaskState == nil || *vm.TaskState != client.TaskStatePlaybookSuccessful {
+		t.Fatalf("stopped VM task_state = %v, want the idle state", vm.TaskState)
+	}
+}

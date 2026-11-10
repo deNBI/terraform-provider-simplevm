@@ -44,6 +44,19 @@ type Option func(*Server)
 // "playbook_failed" instead of completing.
 func WithPlaybookFailure() Option { return func(s *Server) { s.playbookFailure = true } }
 
+// WithIdleTaskState makes VMs report taskState instead of an empty
+// task_state once they are active or stopped and idle, as SimpleVM does with
+// for example "playbook_successful" or "checking_status".
+func WithIdleTaskState(taskState string) Option {
+	return func(s *Server) { s.idleTaskState = taskState }
+}
+
+// WithPlaybookDoneNeverReported makes research environments never report
+// playbook[].done = true, even after the playbook succeeded.
+func WithPlaybookDoneNeverReported() Option {
+	return func(s *Server) { s.playbookDoneNeverReported = true }
+}
+
 // WithForbidden makes every request answer 403.
 func WithForbidden() Option { return func(s *Server) { s.forbidden = true } }
 
@@ -116,16 +129,19 @@ type Server struct {
 	mu              sync.Mutex
 	playbookFailure bool
 	forbidden       bool
-	seq             int64
-	vms             map[string]*vmRec
-	vmOrder         []string
-	vols            map[string]*volRec
-	volOrder        []string
-	snaps           []*snapRec
-	requests        []RecordedRequest
-	injections      []*injection
-	flavors         []client.Flavor
-	images          []client.Image
+	// idleTaskState replaces an empty task_state of active or stopped VMs.
+	idleTaskState             string
+	playbookDoneNeverReported bool
+	seq                       int64
+	vms                       map[string]*vmRec
+	vmOrder                   []string
+	vols                      map[string]*volRec
+	volOrder                  []string
+	snaps                     []*snapRec
+	requests                  []RecordedRequest
+	injections                []*injection
+	flavors                   []client.Flavor
+	images                    []client.Image
 }
 
 // New starts a fake server that is closed when the test ends.
@@ -263,7 +279,10 @@ func (s *Server) advanceVM(vm *vmRec) bool {
 		return false
 	}
 	vm.vmState, vm.taskState = st.vmState, st.taskState
-	if vm.resenv {
+	if vm.taskState == "" && (vm.vmState == client.VMStateActive || vm.vmState == client.VMStateStopped) {
+		vm.taskState = s.idleTaskState
+	}
+	if vm.resenv && !s.playbookDoneNeverReported {
 		vm.playbookDone = st.playbookDone
 	}
 	return true

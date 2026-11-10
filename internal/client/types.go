@@ -27,14 +27,30 @@ const (
 	VolumeStatusDeleted   = "deleted"
 )
 
-// TaskStatePlaybookFailed is the task state of a VM whose playbook failed.
-const TaskStatePlaybookFailed = "playbook_failed"
+// Research environment task states.
+const (
+	// TaskStatePlaybookFailed is the task state of a VM whose playbook failed.
+	TaskStatePlaybookFailed = "playbook_failed"
+	// TaskStatePlaybookSuccessful is the task state of a VM whose playbook
+	// finished; SimpleVM may keep reporting it while the VM is idle.
+	TaskStatePlaybookSuccessful = "playbook_successful"
+)
 
 var (
 	// VMFailureStates are terminal VM states indicating a failed operation.
 	VMFailureStates = []string{"error", "creation_failed"}
 	// VMGoneStates are VM states meaning the VM no longer exists for our purposes.
 	VMGoneStates = []string{VMStateDeleted, "soft-delete", "marked_as_deletable"}
+	// VMBusyTaskStates are (OpenStack) task states of a VM in transition; a
+	// power change is not complete while one of them is reported.
+	VMBusyTaskStates = []string{
+		"scheduling", "spawning", "networking", "block_device_mapping",
+		"powering-off", "powering-on",
+		"rebooting", "reboot_pending", "reboot_started",
+		"rebooting_hard", "reboot_pending_hard", "reboot_started_hard",
+		"pausing", "unpausing", "suspending", "resuming",
+		"rescuing", "unrescuing", "rebuilding", "shelving", "unshelving", "deleting",
+	}
 	// PlaybookRunningTaskStates are task states while the research environment is provisioned.
 	PlaybookRunningTaskStates = []string{"prepare_playbook_build", "building_playbook", "checking_ssh_connection"}
 	// VolumeFailureStates are terminal volume statuses indicating failure.
