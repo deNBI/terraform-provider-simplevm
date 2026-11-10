@@ -195,7 +195,9 @@ func resolveConfig(cfg providerModel, getenv func(string) string) (resolvedConfi
 }
 
 func (p *simpleVMProvider) Resources(_ context.Context) []func() resource.Resource {
-	return nil
+	return []func() resource.Resource{
+		NewVMResource,
+	}
 }
 
 func (p *simpleVMProvider) DataSources(_ context.Context) []func() datasource.DataSource {

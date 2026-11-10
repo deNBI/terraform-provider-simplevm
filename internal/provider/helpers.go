@@ -1,12 +1,16 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -56,3 +60,31 @@ func providerDataInto(raw any, diags *diag.Diagnostics) (*ProviderData, bool) {
 }
 
 func pathRoot(name string) path.Path { return path.Root(name) }
+
+// opTimeouts are the default timeouts of a resource; zero means the operation
+// has no configurable timeout.
+type opTimeouts struct {
+	Create, Update, Delete time.Duration
+}
+
+// timeoutsAttribute returns the `timeouts` attribute for the operations with a
+// non-zero default, with MarkdownDescriptions naming each default.
+func timeoutsAttribute(ctx context.Context, d opTimeouts) schema.Attribute {
+	a := timeouts.Attributes(ctx, timeouts.Opts{Create: d.Create != 0, Update: d.Update != 0, Delete: d.Delete != 0})
+	nested, ok := a.(schema.SingleNestedAttribute)
+	if !ok {
+		return a
+	}
+	defaults := map[string]time.Duration{"create": d.Create, "update": d.Update, "delete": d.Delete}
+	for name, na := range nested.Attributes {
+		sa, ok := na.(schema.StringAttribute)
+		if !ok {
+			continue
+		}
+		sa.MarkdownDescription = fmt.Sprintf("Timeout for the %s operation (default `%s`). %s",
+			name, strings.TrimSuffix(defaults[name].String(), "0s"), sa.Description)
+		nested.Attributes[name] = sa
+	}
+	nested.MarkdownDescription = "Timeouts for long-running operations, as Go durations such as `30m` or `1h`."
+	return nested
+}

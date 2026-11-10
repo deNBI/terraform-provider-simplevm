@@ -138,9 +138,14 @@ func TestParsePollInterval(t *testing.T) {
 }
 
 // newFake starts a fake SimpleVM API and makes long-running operations poll fast.
-// Not usable with t.Parallel because of t.Setenv.
+// SIMPLEVM_* variables are cleared so that exported acceptance-test settings
+// cannot leak into fake-server tests. Not usable with t.Parallel because of
+// t.Setenv.
 func newFake(t *testing.T, opts ...fakeapi.Option) *fakeapi.Server {
 	t.Helper()
+	for _, k := range []string{"SIMPLEVM_PROJECT_ID", "SIMPLEVM_API_KEY", "SIMPLEVM_ENDPOINT"} {
+		t.Setenv(k, "")
+	}
 	t.Setenv("SIMPLEVM_POLL_INTERVAL", "10ms")
 	return fakeapi.New(t, opts...)
 }
