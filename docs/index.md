@@ -39,8 +39,11 @@ header.
     - `project:read` for projects, flavors, images and snapshot images,
     - `vm:read` and the VM change scopes to list, create, stop, resume and delete VMs,
     - the volume scopes, including `volume:change_state` to attach, detach and extend volumes.
-3. Choose an expiry date. Decide whether the key may only touch objects it created
-   ("own objects only") or all objects of the project.
+3. Choose an expiry date. Decide whether to keep "own objects only" switched on
+   (the default; objects you did not create may not be visible to the key) or
+   let the key reach all objects of the project. If a new key cannot see objects
+   already in your state, refresh drops them and the next plan recreates them:
+   check the plan carefully after rotating keys.
 4. Copy the key. It is shown once.
 
 Keep the key out of your configuration; use environment variables:

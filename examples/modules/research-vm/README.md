@@ -13,6 +13,7 @@ module "rstudio" {
   image                         = "RStudio-Ubuntu-22.04"
   research_environment_template = "rstudio"
   volume_size_gb                = 100
+  timeouts                      = { create = "60m" }
 }
 
 output "url" {
@@ -31,6 +32,7 @@ output "url" {
 | `research_environment_template` | string | `null` | Research environment template; `null` for a plain VM. |
 | `volume_size_gb` | number | `null` | Size of a data volume in GiB; `null` for no volume. |
 | `power_state` | string | `"active"` | `active` or `stopped`. |
+| `timeouts` | object({ create, update, delete = optional(string) }) | `null` | Timeouts of the VM, for example `{ create = "60m" }` for a slow research environment. Unset values use the provider defaults (create 30m, update and delete 15m). |
 
 ## Outputs
 

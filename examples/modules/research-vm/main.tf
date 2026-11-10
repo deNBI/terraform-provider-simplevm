@@ -8,6 +8,8 @@ resource "simplevm_vm" "this" {
   research_environment = var.research_environment_template == null ? null : {
     template = var.research_environment_template
   }
+
+  timeouts = var.timeouts
 }
 
 resource "simplevm_volume" "data" {

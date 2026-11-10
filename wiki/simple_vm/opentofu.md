@@ -24,13 +24,16 @@ When you create the key in the **API Key** tab of your project:
     - the scopes for creating and deleting volumes,
     - `volume:change_state` to attach, detach and extend volumes.
 2. Choose an expiry date. When the key expires, the provider can no longer manage your resources, so create a new key and export it.
-3. Keep "Own Objects Only" switched on if you only want to manage objects created with this key (see the FAQ below).
+3. Keep "Own Objects Only" switched on (the default) unless the key must reach objects that you did not create. With it switched on, objects you did not create may not be visible to the key (see the FAQ below).
 4. Copy the key right away. SimpleVM shows it only once.
 
 !!! warning "Keep your key secret"
     Anyone with the key can act in your project within its scopes. Do not write it into files that you share or commit to git. Use an environment variable as shown below.
 
 The owner of the API key becomes the owner of the VMs created with it.
+
+!!! warning "Check the plan after changing your key"
+    If a new key cannot see objects that are already in your state, for example because of "Own Objects Only", OpenTofu treats them as deleted: the refresh drops them from the state and the next plan proposes to create them again. After rotating or replacing a key, run `tofu plan` and check it carefully before you apply.
 
 ## Installing OpenTofu or Terraform
 
@@ -294,7 +297,7 @@ Run `tofu plan` afterwards and check that it shows no changes.
 
 **Which things are out of scope?** Workshops, port opening, monitoring, credits, and one-off actions such as rebooting or rescuing VMs.
 
-**What does "own objects only" mean for my key?** With it switched on (the default), you may not see objects created by others. Switch it off only if you are sure you want the key to reach everything in the project.
+**What does "own objects only" mean for my key?** With it switched on (the default), objects you did not create may not be visible to the key, so OpenTofu can neither read nor manage them. Switch it off only if you are sure you want the key to reach everything in the project. When you replace a key, check `tofu plan` first (see Prerequisites).
 
 **`tofu apply` stops with a timeout.** Creating machines can take longer than expected. Raise the limit, for example `timeouts = { create = "60m" }`. A VM or volume whose creation timed out is marked as tainted, so the next `tofu apply` deletes it and creates it again; check the plan. A snapshot that times out is kept instead (see above).
 

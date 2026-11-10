@@ -22,6 +22,12 @@ Every argument replaces the snapshot when changed. **Import is not supported.**
 ## Example Usage
 
 ```terraform
+resource "simplevm_vm" "web" {
+  name   = "web"
+  flavor = "de.NBI default"
+  image  = "Ubuntu-22.04"
+}
+
 # Snapshots cannot be deleted through the SimpleVM API: destroying this
 # resource only removes it from state.
 resource "simplevm_snapshot" "before_upgrade" {

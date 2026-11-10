@@ -36,6 +36,16 @@ variable "volume_size_gb" {
   description = "Size in GiB of a data volume to create and attach. Leave null for no volume."
 }
 
+variable "timeouts" {
+  type = object({
+    create = optional(string)
+    update = optional(string)
+    delete = optional(string)
+  })
+  default     = null
+  description = "Timeouts for the VM as Go durations, for example { create = \"60m\" }. Unset values use the provider defaults (create 30m, update and delete 15m)."
+}
+
 variable "power_state" {
   type        = string
   default     = "active"
