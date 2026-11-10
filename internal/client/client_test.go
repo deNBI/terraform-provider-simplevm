@@ -3,9 +3,11 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -160,5 +162,34 @@ func TestNew_RequiresHTTPS(t *testing.T) {
 		if err != nil && !strings.Contains(err.Error(), "https") {
 			t.Errorf("%s: message lacks https: %v", ep, err)
 		}
+	}
+}
+
+func TestIsTransient(t *testing.T) {
+	netErr := &url.Error{Op: "Get", URL: "https://x/", Err: errors.New("connection reset by peer")}
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"nil":               {nil, false},
+		"502":               {&APIError{StatusCode: http.StatusBadGateway}, true},
+		"503 wrapped":       {fmt.Errorf("listing: %w", &APIError{StatusCode: http.StatusServiceUnavailable}), true},
+		"500":               {&APIError{StatusCode: http.StatusInternalServerError}, true},
+		"429":               {&APIError{StatusCode: http.StatusTooManyRequests}, true},
+		"400":               {&APIError{StatusCode: http.StatusBadRequest}, false},
+		"401":               {&APIError{StatusCode: http.StatusUnauthorized}, false},
+		"403":               {&APIError{StatusCode: http.StatusForbidden}, false},
+		"404":               {&APIError{StatusCode: http.StatusNotFound}, false},
+		"not found":         {ErrNotFound, false},
+		"network":           {fmt.Errorf("SimpleVM API GET x: %w", netErr), true},
+		"deadline":          {&url.Error{Op: "Get", URL: "https://x/", Err: context.DeadlineExceeded}, false},
+		"canceled":          {fmt.Errorf("x: %w", context.Canceled), false},
+		"other plain error": {errors.New("VM entered failure state"), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := IsTransient(tc.err); got != tc.want {
+				t.Errorf("IsTransient(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -315,4 +316,35 @@ func TestVM_WaitTimeoutReportsState(t *testing.T) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}
 	}
+}
+
+// TestVM_TransientPollErrorsAreRetried checks that a few 5xx answers while
+// polling do not fail the create.
+func TestVM_TransientPollErrorsAreRetried(t *testing.T) {
+	s := newFake(t)
+	// No GET vms/ happens before the create's wait starts.
+	s.FailRequests(http.MethodGet, "vms/", 2, http.StatusServiceUnavailable)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: vmConfig(s, "Ubuntu-22.04", ""),
+			Check:  resource.TestCheckResourceAttr(vmAddr, "vm_state", "active"),
+		}},
+	})
+}
+
+// TestVM_TooManyTransientPollErrorsFail checks that polling gives up after
+// more than client.MaxConsecutiveTransientErrors transient errors in a row.
+func TestVM_TooManyTransientPollErrorsFail(t *testing.T) {
+	s := newFake(t)
+	s.FailRequests(http.MethodGet, "vms/", client.MaxConsecutiveTransientErrors+1, http.StatusServiceUnavailable)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config:      vmConfig(s, "Ubuntu-22.04", ""),
+			ExpectError: regexp.MustCompile(`HTTP 503`),
+		}},
+	})
 }

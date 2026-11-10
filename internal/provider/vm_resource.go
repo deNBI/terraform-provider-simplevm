@@ -323,7 +323,8 @@ func (r *vmResource) setPower(ctx context.Context, vm *client.VM, target string)
 
 // waitVM polls the VM until done reports true or returns an error. done gets
 // nil when the VM no longer exists. The last observed VM is returned (nil if
-// none was seen); errors name its vm_state and task_state.
+// none was seen); errors name its vm_state and task_state. Transient API
+// errors are retried by client.WaitFor.
 func (r *vmResource) waitVM(ctx context.Context, uuid string, done func(*client.VM) (bool, error)) (*client.VM, error) {
 	var last *client.VM
 	status := "none observed yet"

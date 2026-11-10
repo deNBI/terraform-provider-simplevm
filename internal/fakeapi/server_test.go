@@ -402,3 +402,39 @@ func TestFake_MissingTrailingSlashRedirects(t *testing.T) {
 		t.Fatalf("recorded %+v", reqs)
 	}
 }
+
+func TestFake_FailRequestsAndRespondTo(t *testing.T) {
+	srv := fakeapi.New(t)
+	c := newClient(t, srv)
+	ctx := context.Background()
+	srv.FailRequests(http.MethodGet, "vms/", 2, http.StatusServiceUnavailable)
+	for i := range 2 {
+		var ae *client.APIError
+		if _, err := c.ListVMs(ctx); !asAPIError(err, &ae) || ae.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("request %d: want 503, got %v", i, err)
+		}
+	}
+	if _, err := c.ListVMs(ctx); err != nil {
+		t.Fatalf("injection not used up: %v", err)
+	}
+
+	uuid := createVM(t, c, "vm1", "Ubuntu-22.04", nil)
+	waitVM(t, c, uuid, isActive)
+	srv.FailRequests(http.MethodPost, "vms/*/action/", 1, http.StatusConflict)
+	var ae *client.APIError
+	if _, err := c.VMAction(ctx, uuid, client.VMActionStop); !asAPIError(err, &ae) || ae.StatusCode != http.StatusConflict {
+		t.Fatalf("want 409, got %v", err)
+	}
+	if vm, _ := c.GetVM(ctx, uuid); vm == nil || vm.VMState != client.VMStateActive || vm.TaskState != nil {
+		t.Fatalf("rejected action changed the VM: %+v", vm)
+	}
+
+	srv.RespondTo(http.MethodPost, "vms/", 1, http.StatusCreated, map[string]string{"os_action": "create"})
+	resp, err := c.CreateVM(ctx, client.CreateVMRequest{ProjectID: fakeapi.ProjectID, ImageName: "Ubuntu-22.04", FlavorName: "de.NBI small", VMName: "x"})
+	if err != nil || resp.UUID != "" {
+		t.Fatalf("canned response not served: %+v %v", resp, err)
+	}
+	if vms, _ := c.ListVMs(ctx); len(vms) != 1 {
+		t.Fatalf("canned create must not create a VM, have %d", len(vms))
+	}
+}

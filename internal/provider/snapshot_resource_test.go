@@ -91,3 +91,19 @@ func TestSnapshot_DestroyWarnsAndKeepsImage(t *testing.T) {
 		Steps: []resource.TestStep{{Config: fakeProviderConfig(s) + snapshotConfigBody}},
 	})
 }
+
+// TestSnapshot_TransientPollErrorsAreRetried checks that a 502 while polling
+// the snapshot images does not fail the create (which would leave an
+// undeletable duplicate on the next apply).
+func TestSnapshot_TransientPollErrorsAreRetried(t *testing.T) {
+	s := newFake(t)
+	s.FailRequests(http.MethodGet, "projects/1/snapshots/images/", 2, http.StatusBadGateway)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: fakeProviderConfig(s) + snapshotConfigBody,
+			Check:  resource.TestCheckResourceAttr(snapAddr, "status", "active"),
+		}},
+	})
+}

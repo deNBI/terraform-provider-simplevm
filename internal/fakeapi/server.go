@@ -78,6 +78,31 @@ type volRec struct {
 	pending                         []volStep
 }
 
+// injection answers matching requests with a canned response instead of
+// handling them.
+type injection struct {
+	method, path string // path relative to the API root; "*" matches one segment
+	remaining    int
+	status       int
+	body         any
+}
+
+func (in *injection) matches(method, rel string) bool {
+	if in.remaining <= 0 || in.method != method {
+		return false
+	}
+	want, got := strings.Split(in.path, "/"), strings.Split(rel, "/")
+	if len(want) != len(got) {
+		return false
+	}
+	for i := range want {
+		if want[i] != "*" && want[i] != got[i] {
+			return false
+		}
+	}
+	return true
+}
+
 type snapRec struct {
 	name, description, openstackID, status string
 	activate                               bool // next observation turns it active
@@ -98,6 +123,7 @@ type Server struct {
 	volOrder        []string
 	snaps           []*snapRec
 	requests        []RecordedRequest
+	injections      []*injection
 	flavors         []client.Flavor
 	images          []client.Image
 }
@@ -174,6 +200,23 @@ func (s *Server) SetVMState(uuid, vmState, taskState string) {
 		return
 	}
 	vm.vmState, vm.taskState, vm.pending = vmState, taskState, nil
+}
+
+// FailRequests makes the next n requests with the given method and path
+// answer status with an error body, without touching any state. path is
+// relative to the API root and ends in "/", e.g. "vms/" or "vms/*/action/";
+// "*" matches one path segment. Injections are matched before routing, in the
+// order they were added.
+func (s *Server) FailRequests(method, path string, n, status int) {
+	s.RespondTo(method, path, n, status, map[string]string{"detail": http.StatusText(status)})
+}
+
+// RespondTo makes the next n requests with the given method and path (as for
+// FailRequests) answer status with body, without touching any state.
+func (s *Server) RespondTo(method, path string, n, status int, body any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.injections = append(s.injections, &injection{method: method, path: path, remaining: n, status: status, body: body})
 }
 
 // ---- internals (callers hold s.mu) ----
@@ -331,7 +374,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMovedPermanently)
 		return
 	default:
-		resp = s.route(r, body)
+		resp = s.injected(r)
+		if resp.status == 0 {
+			resp = s.route(r, body)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.status)
@@ -340,6 +386,19 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		enc.SetEscapeHTML(false)
 		_ = enc.Encode(resp.body)
 	}
+}
+
+// injected returns the canned response of the first matching injection, or a
+// zero response.
+func (s *Server) injected(r *http.Request) response {
+	rel := strings.TrimPrefix(r.URL.Path, pathPrefix)
+	for _, in := range s.injections {
+		if in.matches(r.Method, rel) {
+			in.remaining--
+			return response{in.status, in.body}
+		}
+	}
+	return response{}
 }
 
 func (s *Server) route(r *http.Request, body []byte) response {

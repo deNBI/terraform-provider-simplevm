@@ -305,7 +305,8 @@ func (r *volumeResource) ImportState(ctx context.Context, req resource.ImportSta
 
 // waitVolume polls the volume until done reports true or returns an error.
 // done gets nil when the volume no longer exists. The last observed volume is
-// returned (nil if none was seen); errors name its status.
+// returned (nil if none was seen); errors name its status. Transient API
+// errors are retried by client.WaitFor.
 func (r *volumeResource) waitVolume(ctx context.Context, uuid string, done func(*client.Volume) (bool, error)) (*client.Volume, error) {
 	var last *client.Volume
 	status := "none observed yet"

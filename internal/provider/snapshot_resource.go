@@ -218,6 +218,7 @@ func applySnapshotImage(m *snapshotModel, img *client.Image) {
 // waitSnapshot polls the project's snapshot images until the snapshot is
 // active. The image is matched on id, or on exact name when the create
 // response carried no id. The last observed image is returned (nil if none).
+// Transient API errors are retried by client.WaitFor.
 func (r *snapshotResource) waitSnapshot(ctx context.Context, projectID int64, id, name string) (*client.Image, error) {
 	var last *client.Image
 	status := "image not listed yet"

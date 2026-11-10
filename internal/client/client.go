@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -124,6 +125,24 @@ func IsNotFound(err error) bool {
 	}
 	var ae *APIError
 	return errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound
+}
+
+// IsTransient reports whether err is worth retrying while polling: an HTTP
+// 5xx or 429 answer, or a network error (connection refused or reset, client
+// timeout, ...). Context cancellation and deadline expiry are not transient,
+// nor is any other API error (4xx, including 401/403 and 404).
+func IsTransient(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var ae *APIError
+	if errors.As(err, &ae) {
+		return ae.StatusCode >= 500 || ae.StatusCode == http.StatusTooManyRequests
+	}
+	// httpClient.Do reports every transport failure as *url.Error.
+	var ue *url.Error
+	var ne net.Error
+	return errors.As(err, &ue) || errors.As(err, &ne)
 }
 
 // do performs a request against a path relative to the base URL (no leading
