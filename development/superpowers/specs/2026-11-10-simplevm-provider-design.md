@@ -1,7 +1,7 @@
 # SimpleVM OpenTofu/Terraform Provider — Design
 
 Date: 2026-11-10
-Status: Draft, awaiting approval (builder check done)
+Status: Approved 2026-11-10
 
 ## Intent
 
