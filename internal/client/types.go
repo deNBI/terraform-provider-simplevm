@@ -196,6 +196,14 @@ type CreateVolumeRequest struct {
 	VolumeSnapID   string `json:"volume_snap_id,omitempty"`
 }
 
+// Volume OS actions for VolumeActionRequest.OSAction.
+const (
+	VolumeActionAttach = "attach"
+	VolumeActionDetach = "detach"
+	VolumeActionRename = "rename"
+	VolumeActionExtend = "extend"
+)
+
 // VolumeActionRequest is the body of POST volumes/{uuid}/action/.
 // Request shape assumed from the SimpleVM wiki (not in OpenAPI schema).
 type VolumeActionRequest struct {

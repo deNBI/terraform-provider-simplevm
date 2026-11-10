@@ -247,7 +247,7 @@ func (r *volumeResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	if plan.Name.ValueString() != state.Name.ValueString() {
 		renamed, err := r.pd.Client.VolumeAction(ctx, uuid, client.VolumeActionRequest{
-			OSAction: "rename", NewName: plan.Name.ValueString(),
+			OSAction: client.VolumeActionRename, NewName: plan.Name.ValueString(),
 		})
 		if err != nil {
 			fail("Unable to rename volume "+uuid, err)
@@ -257,7 +257,7 @@ func (r *volumeResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 	if extend {
 		if _, err := r.pd.Client.VolumeAction(ctx, uuid, client.VolumeActionRequest{
-			OSAction: "extend", Size: plan.Size.ValueInt64(),
+			OSAction: client.VolumeActionExtend, Size: plan.Size.ValueInt64(),
 		}); err != nil {
 			fail("Unable to extend volume "+uuid, err)
 			return
