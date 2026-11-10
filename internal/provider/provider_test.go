@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -117,5 +118,19 @@ func TestProvider_ServesOverProtocol6(t *testing.T) {
 	}
 	if len(resp.Diagnostics) > 0 || resp.Provider == nil {
 		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestParsePollInterval(t *testing.T) {
+	if d, err := parsePollInterval(""); err != nil || d != DefaultPollInterval {
+		t.Fatalf("default: %v %v", d, err)
+	}
+	if d, err := parsePollInterval("250ms"); err != nil || d != 250*time.Millisecond {
+		t.Fatalf("valid: %v %v", d, err)
+	}
+	for _, bad := range []string{"abc", "0s", "-5s", "10"} {
+		if _, err := parsePollInterval(bad); err == nil {
+			t.Errorf("%q: expected error", bad)
+		}
 	}
 }

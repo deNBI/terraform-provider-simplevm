@@ -61,9 +61,26 @@ func New(cfg Config) (*Client, error) {
 	if u.Scheme == "" || u.Host == "" {
 		return nil, fmt.Errorf("invalid endpoint %q: must be an absolute URL", cfg.Endpoint)
 	}
-	hc := cfg.HTTPClient
-	if hc == nil {
+	if u.Scheme != "https" && !isLoopback(u.Hostname()) {
+		return nil, fmt.Errorf("invalid endpoint %q: the API key would be sent unencrypted, use https", cfg.Endpoint)
+	}
+	var hc *http.Client
+	if cfg.HTTPClient == nil {
 		hc = &http.Client{Timeout: 60 * time.Second}
+	} else {
+		cp := *cfg.HTTPClient // never mutate the caller's client
+		hc = &cp
+	}
+	// Never follow redirects: Go would forward X-API-KEY cross-origin and turn
+	// POST into GET. A 3xx is reported as an APIError instead.
+	prev := hc.CheckRedirect
+	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if prev != nil {
+			if err := prev(req, via); err != nil {
+				return err
+			}
+		}
+		return http.ErrUseLastResponse
 	}
 	ua := cfg.UserAgent
 	if ua == "" {
@@ -72,18 +89,27 @@ func New(cfg Config) (*Client, error) {
 	return &Client{baseURL: u, apiKey: cfg.APIKey, userAgent: ua, httpClient: hc}, nil
 }
 
+func isLoopback(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
 // APIError is returned for any non-2xx response.
 type APIError struct {
 	StatusCode int
 	Method     string
 	URL        string
 	Body       string
+	// Location is the Location header of a 3xx response.
+	Location string
 }
 
 func (e *APIError) Error() string {
 	msg := fmt.Sprintf("SimpleVM API %s %s returned HTTP %d", e.Method, e.URL, e.StatusCode)
 	if e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden {
 		msg += ": check that the API key is valid, not expired and has the required scope"
+	}
+	if e.StatusCode >= 300 && e.StatusCode < 400 {
+		msg += fmt.Sprintf(": the endpoint redirected to %q; check the endpoint URL and its trailing slash", e.Location)
 	}
 	if e.Body != "" {
 		msg += ": " + e.Body
@@ -138,11 +164,12 @@ func (c *Client) doURL(ctx context.Context, method, rawURL string, body any, out
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		loc := resp.Header.Get("Location")
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 		tflog.Debug(ctx, "SimpleVM API error response", map[string]any{
 			"method": method, "url": rawURL, "status": resp.StatusCode,
 		})
-		return &APIError{StatusCode: resp.StatusCode, Method: method, URL: rawURL, Body: strings.TrimSpace(string(b))}
+		return &APIError{StatusCode: resp.StatusCode, Method: method, URL: rawURL, Body: strings.TrimSpace(string(b)), Location: loc}
 	}
 	tflog.Debug(ctx, "SimpleVM API response", map[string]any{
 		"method": method, "url": rawURL, "status": resp.StatusCode,

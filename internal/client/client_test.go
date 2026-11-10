@@ -121,3 +121,44 @@ func TestDo_NotFound(t *testing.T) {
 		t.Fatal("ErrNotFound should be not found")
 	}
 }
+
+func TestDo_DoesNotFollowRedirect(t *testing.T) {
+	contacted := false
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { contacted = true }))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/x/", http.StatusFound)
+	}))
+	defer srv.Close()
+	orig := &http.Client{}
+	c, _ := New(Config{Endpoint: srv.URL, APIKey: "k", HTTPClient: orig})
+	if orig.CheckRedirect != nil {
+		t.Fatal("caller's client was mutated")
+	}
+	err := c.do(context.Background(), http.MethodPost, "vms/", map[string]int{"a": 1}, nil)
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.StatusCode != 302 || !strings.Contains(err.Error(), "redirect") || !strings.Contains(err.Error(), other.URL) {
+		t.Fatalf("err = %v", err)
+	}
+	if contacted {
+		t.Fatal("redirect target was contacted")
+	}
+}
+
+func TestNew_RequiresHTTPS(t *testing.T) {
+	for ep, ok := range map[string]bool{
+		"https://example.org/api": true,
+		"http://example.org/api":  false,
+		"http://127.0.0.1:8080/":  true,
+		"http://localhost/api":    true,
+		"http://[::1]:8080/":      true,
+	} {
+		_, err := New(Config{Endpoint: ep, APIKey: "k"})
+		if (err == nil) != ok {
+			t.Errorf("%s: err = %v", ep, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "https") {
+			t.Errorf("%s: message lacks https: %v", ep, err)
+		}
+	}
+}

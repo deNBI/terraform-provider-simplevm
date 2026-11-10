@@ -19,7 +19,7 @@ import (
 )
 
 // DefaultEndpoint is the SimpleVM portal API used when no endpoint is configured.
-const DefaultEndpoint = "https://simplevm.denbi.de/portal/api/"
+const DefaultEndpoint = client.DefaultEndpoint
 
 var _ fwprovider.Provider = &simpleVMProvider{}
 
@@ -99,15 +99,10 @@ func (p *simpleVMProvider) Configure(ctx context.Context, req fwprovider.Configu
 		return
 	}
 
-	pollInterval := DefaultPollInterval
-	if v := os.Getenv("SIMPLEVM_POLL_INTERVAL"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil || d <= 0 {
-			resp.Diagnostics.AddError("Invalid SIMPLEVM_POLL_INTERVAL",
-				fmt.Sprintf("SIMPLEVM_POLL_INTERVAL must be a positive Go duration such as \"10s\", got %q.", v))
-			return
-		}
-		pollInterval = d
+	pollInterval, err := parsePollInterval(os.Getenv("SIMPLEVM_POLL_INTERVAL"))
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid SIMPLEVM_POLL_INTERVAL", err.Error())
+		return
 	}
 
 	c, err := client.New(client.Config{
@@ -126,6 +121,18 @@ func (p *simpleVMProvider) Configure(ctx context.Context, req fwprovider.Configu
 	}
 	resp.ResourceData = data
 	resp.DataSourceData = data
+}
+
+// parsePollInterval parses SIMPLEVM_POLL_INTERVAL; empty selects the default.
+func parsePollInterval(v string) (time.Duration, error) {
+	if v == "" {
+		return DefaultPollInterval, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("SIMPLEVM_POLL_INTERVAL must be a positive Go duration such as \"10s\", got %q", v)
+	}
+	return d, nil
 }
 
 // resolveConfig merges configuration values with environment variables

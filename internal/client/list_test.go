@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,50 @@ func TestListAll_FollowsNext(t *testing.T) {
 	}
 	if len(reqs) != 2 || reqs[0] != "/api/vms/?page_size=100" || reqs[1] != "/api/vms/?page=2&page_size=100" {
 		t.Fatalf("reqs = %v", reqs)
+	}
+}
+
+func TestListAll_RejectsForeignNextHost(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"next":"https://evil.example/api/vms/?page=2","results":[{"id":1}]}`))
+	}))
+	defer srv.Close()
+	c, _ := New(Config{Endpoint: srv.URL + "/api", APIKey: "k"})
+	if _, err := listAll[item](context.Background(), c, "vms/"); err == nil {
+		t.Fatal("expected error for foreign host")
+	}
+}
+
+func TestListAll_UpgradesHTTPNextToBaseScheme(t *testing.T) {
+	var reqs []string
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs = append(reqs, r.URL.RequestURI())
+		if r.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`{"next":null,"results":[{"id":2}]}`))
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"next":"http://%s/api/vms/?page=2&x=y","results":[{"id":1}]}`, srv.Listener.Addr())
+	}))
+	defer srv.Close()
+	c, _ := New(Config{Endpoint: srv.URL + "/api", APIKey: "k", HTTPClient: srv.Client()})
+	items, err := listAll[item](context.Background(), c, "vms/")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	if len(reqs) != 2 || reqs[1] != "/api/vms/?page=2&x=y" {
+		t.Fatalf("reqs = %v", reqs)
+	}
+}
+
+func TestListAll_DetectsRepeatedNext(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"next":%q,"results":[{"id":1}]}`, srv.URL+"/api/vms/?page=2")
+	}))
+	defer srv.Close()
+	c, _ := New(Config{Endpoint: srv.URL + "/api", APIKey: "k"})
+	if _, err := listAll[item](context.Background(), c, "vms/"); err == nil || !strings.Contains(err.Error(), "loops") {
+		t.Fatalf("err = %v", err)
 	}
 }
