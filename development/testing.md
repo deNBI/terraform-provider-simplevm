@@ -24,7 +24,7 @@ make testacc
 
 Optional: `SIMPLEVM_ACC_FLAVOR`, `SIMPLEVM_ACC_IMAGE` and `SIMPLEVM_ACC_RESENV_IMAGE` (the research environment test is skipped without it). Resources are named `tfacc-xxxxxx`. If a test is interrupted, delete leftovers in the portal; snapshots can only be deleted there.
 
-In CI they run through the `acceptance.yml` workflow (manual dispatch with a `cli` input, plus a weekly schedule; it skips with a notice when the secrets are not set) using the repository secrets `SIMPLEVM_API_KEY` and `SIMPLEVM_PROJECT_ID`.
+In CI they run through the `acceptance.yml` workflow, on manual dispatch only (with a `cli` input; it skips with a notice when the secrets are not set), using the repository secrets `SIMPLEVM_API_KEY` and `SIMPLEVM_PROJECT_ID`. There is no schedule because every run of `TestAccVM_FullLifecycle` leaves behind a `tfacc-` snapshot that the API cannot delete; remove it in the portal after each run.
 
 ## Running against OpenTofu
 

@@ -69,7 +69,7 @@ The SimpleVM OpenAPI schema does not document some request bodies. They are take
 - Volume action parameters `vm_uuid` (attach), `size` (extend), `new_name` (rename).
 - `DELETE /volumes/{uuid}/`, `GET /projects/by-api-key/`.
 
-The real-API acceptance tests exercise these shapes, but had not yet been run against the real API when this was written. If the API disagrees, fix the client and the fake together.
+The real-API acceptance tests exercise all of them: `TestAccVM_FullLifecycle` creates a VM, renames and grows a volume, attaches it and deletes both; `TestAccDataSources` reads `simplevm_project` without `id`. They had not yet been run against the real API when this was written. If the API disagrees, fix the client and the fake together.
 
 ## Adding a resource
 

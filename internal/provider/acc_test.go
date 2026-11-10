@@ -80,6 +80,8 @@ func checkAttrEmptyOrUnset(addr, attr string) resource.TestCheckFunc {
 func TestAccDataSources(t *testing.T) {
 	cfg := accProviderConfig + accImagesData + fmt.Sprintf(`
 data "simplevm_projects" "all" {}
+# No id: the key's own project, from GET projects/by-api-key/.
+data "simplevm_project" "current" {}
 data "simplevm_flavors" "all" {}
 data "simplevm_flavor" "test" {
   name = %q
@@ -95,6 +97,8 @@ data "simplevm_image" "test" {
 			Config: cfg,
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttrSet("data.simplevm_projects.all", "projects.#"),
+				resource.TestCheckResourceAttrSet("data.simplevm_project.current", "id"),
+				resource.TestCheckResourceAttrSet("data.simplevm_project.current", "shortname"),
 				resource.TestCheckResourceAttrSet("data.simplevm_flavors.all", "flavors.#"),
 				resource.TestCheckResourceAttr("data.simplevm_flavor.test", "name", accFlavor()),
 				resource.TestCheckResourceAttrSet("data.simplevm_flavor.test", "vcpus"),
@@ -108,11 +112,13 @@ data "simplevm_image" "test" {
 func TestAccVM_FullLifecycle(t *testing.T) {
 	vmName := accName()
 	volName := accName()
+	volRenamed := accName()
 	snapName := accName()
 	const vm, vol, att, snap = "simplevm_vm.test", "simplevm_volume.test", "simplevm_volume_attachment.test", "simplevm_snapshot.test"
 
-	// config builds the configuration; the flags add the pieces of later steps.
-	config := func(power string, attach, snapshot bool) string {
+	// config builds the configuration; volume name and size change in place in
+	// a later step, the flags add the pieces of later steps.
+	config := func(power, vol string, size int, attach, snapshot bool) string {
 		c := accProviderConfig + accImagesData + fmt.Sprintf(`
 resource "simplevm_vm" "test" {
   name        = %q
@@ -128,9 +134,9 @@ resource "simplevm_vm" "test" {
 
 resource "simplevm_volume" "test" {
   name = %q
-  size = 1
+  size = %d
 }
-`, vmName, accFlavor(), accImageExpr(), power, volName)
+`, vmName, accFlavor(), accImageExpr(), power, vol, size)
 		if attach {
 			c += `
 resource "simplevm_volume_attachment" "test" {
@@ -159,7 +165,7 @@ resource "simplevm_snapshot" "test" {
 		},
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{{
-			Config: config("active", false, false),
+			Config: config("active", volName, 1, false, false),
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttrSet(vm, "id"),
 				resource.TestCheckResourceAttr(vm, "name", vmName),
@@ -173,7 +179,7 @@ resource "simplevm_snapshot" "test" {
 			),
 		}, {
 			// No drift and no replace loop right after create.
-			Config:   config("active", false, false),
+			Config:   config("active", volName, 1, false, false),
 			PlanOnly: true,
 		}, {
 			ResourceName:            vm,
@@ -186,13 +192,23 @@ resource "simplevm_snapshot" "test" {
 			ImportStateVerify:       true,
 			ImportStateVerifyIgnore: []string{"timeouts"},
 		}, {
-			Config: config("active", true, false),
+			// rename (new_name) and extend (size), in place.
+			Config: config("active", volRenamed, 2, false, false),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(vol, plancheck.ResourceActionUpdate),
+			}},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(vol, "name", volRenamed),
+				resource.TestCheckResourceAttr(vol, "size", "2"),
+			),
+		}, {
+			Config: config("active", volRenamed, 2, true, false),
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttrSet(att, "id"),
 				resource.TestCheckResourceAttrSet(att, "device"),
 			),
 		}, {
-			Config: config("stopped", true, false),
+			Config: config("stopped", volRenamed, 2, true, false),
 			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
 				plancheck.ExpectResourceAction(vm, plancheck.ResourceActionUpdate),
 			}},
@@ -201,7 +217,7 @@ resource "simplevm_snapshot" "test" {
 				resource.TestCheckResourceAttr(vm, "vm_state", "stopped"),
 			),
 		}, {
-			Config: config("active", true, false),
+			Config: config("active", volRenamed, 2, true, false),
 			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
 				plancheck.ExpectResourceAction(vm, plancheck.ResourceActionUpdate),
 			}},
@@ -211,7 +227,7 @@ resource "simplevm_snapshot" "test" {
 				checkAttrEmptyOrUnset(vm, "task_state"),
 			),
 		}, {
-			Config: config("active", true, true),
+			Config: config("active", volRenamed, 2, true, true),
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttrSet(snap, "id"),
 				resource.TestCheckResourceAttr(snap, "name", snapName),

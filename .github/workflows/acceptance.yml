@@ -1,6 +1,7 @@
 name: Acceptance
 
-# Creates real, billable VMs in a SimpleVM project. Run manually or weekly.
+# Creates real, billable VMs in a SimpleVM project. Manual dispatch only: each
+# run leaves behind a snapshot that the API cannot delete.
 on:
   workflow_dispatch:
     inputs:
@@ -9,8 +10,6 @@ on:
         type: choice
         options: [terraform, tofu]
         default: terraform
-  schedule:
-    - cron: "0 3 * * 1"
 
 permissions:
   contents: read
