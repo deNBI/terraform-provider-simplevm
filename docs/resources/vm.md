@@ -58,7 +58,7 @@ resource "simplevm_vm" "rstudio" {
 
 - `flavor` (String) Name of the flavor, for example `de.NBI default`; see the `simplevm_flavors` data source. Changing it replaces the VM.
 - `image` (String) Name of the base image or snapshot image; see the `simplevm_images` and `simplevm_snapshot_images` data sources. Changing it replaces the VM.
-- `name` (String) Name of the VM, 1 to 100 characters. Changing it replaces the VM.
+- `name` (String) Name of the VM, 1 to 100 characters. SimpleVM appends a suffix to it; see `full_name`. Changing it replaces the VM, unless `full_name` is the new name plus such a suffix (for example after an import).
 
 ### Optional
 
@@ -71,6 +71,7 @@ resource "simplevm_vm" "rstudio" {
 
 - `created_at` (String) Creation time of the VM as reported by SimpleVM.
 - `fixed_ip` (String) Fixed (internal) IP address of the VM.
+- `full_name` (String) Name of the VM in SimpleVM: `name` plus the suffix SimpleVM appends, for example `my-vm-faaef`.
 - `id` (String) UUID of the VM in SimpleVM.
 - `openstack_id` (String) OpenStack ID of the VM.
 - `research_environment_url` (String) URL of the research environment; empty for VMs without one.

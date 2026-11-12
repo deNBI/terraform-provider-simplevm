@@ -139,6 +139,8 @@ resource "simplevm_vm" "base" {
 }
 ```
 
+SimpleVM appends a short suffix to the VM name, so `analysis` shows up as, for example, `analysis-faaef` in the portal. The provider keeps `name` as you wrote it and reports the portal name as `full_name`.
+
 Changing `name`, `flavor`, `image` or the research environment of an existing VM **replaces** it: the old VM is deleted and a new one is created. Always read the plan before you apply.
 
 ### A VM with a research environment

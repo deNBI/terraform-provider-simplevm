@@ -89,6 +89,9 @@ func TestVM_BaseImage(t *testing.T) {
 				resource.TestCheckResourceAttr(vmAddr, "vm_state", "active"),
 				resource.TestCheckResourceAttr(vmAddr, "power_state", "active"),
 				resource.TestCheckResourceAttr(vmAddr, "project_id", "1"),
+				// SimpleVM appends a suffix; name keeps the configured value.
+				resource.TestCheckResourceAttr(vmAddr, "name", "tf-test"),
+				resource.TestCheckResourceAttr(vmAddr, "full_name", "tf-test-a0001"),
 				resource.TestCheckResourceAttrSet(vmAddr, "id"),
 				resource.TestCheckResourceAttrSet(vmAddr, "openstack_id"),
 				resource.TestCheckResourceAttrSet(vmAddr, "fixed_ip"),
@@ -114,12 +117,88 @@ func TestVM_BaseImage(t *testing.T) {
 				resource.TestCheckResourceAttr(vmAddr, "power_state", "active"),
 			),
 		}, {
-			ResourceName:            vmAddr,
-			ImportState:             true,
-			ImportStateVerify:       true,
-			ImportStateVerifyIgnore: []string{"timeouts", "research_environment"},
+			ResourceName:      vmAddr,
+			ImportState:       true,
+			ImportStateVerify: true,
+			// An import only knows the full name; see TestVM_ImportThenApplyKeepsVM.
+			ImportStateVerifyIgnore: []string{"timeouts", "research_environment", "name"},
 		}},
 	})
+}
+
+// TestVM_ImportThenApplyKeepsVM checks that importing a VM, which sets name
+// to the suffixed full_name, followed by a config with the short name
+// updates name in place instead of replacing the VM.
+func TestVM_ImportThenApplyKeepsVM(t *testing.T) {
+	s := newFake(t)
+	created, err := fakeClient(t, s).CreateVM(context.Background(), client.CreateVMRequest{
+		ProjectID: fakeapi.ProjectID, ImageName: "Ubuntu-22.04", FlavorName: "de.NBI default", VMName: "tf-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := vmConfig(s, "Ubuntu-22.04", "") + fmt.Sprintf(`
+import {
+  to = simplevm_vm.test
+  id = %q
+}
+`, created.UUID)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: cfg,
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(vmAddr, plancheck.ResourceActionUpdate),
+			}},
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(vmAddr, "id", created.UUID),
+				resource.TestCheckResourceAttr(vmAddr, "name", "tf-test"),
+				resource.TestCheckResourceAttr(vmAddr, "full_name", "tf-test-a0001"),
+			),
+		}, {
+			Config:   cfg,
+			PlanOnly: true,
+		}},
+	})
+}
+
+// TestVM_RenameReplaces checks that a real name change still replaces the VM.
+func TestVM_RenameReplaces(t *testing.T) {
+	s := newFake(t)
+	cfg := vmConfig(s, "Ubuntu-22.04", "")
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: cfg,
+		}, {
+			Config: strings.Replace(cfg, `"tf-test"`, `"tf-test-b"`, 1),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(vmAddr, plancheck.ResourceActionDestroyBeforeCreate),
+			}},
+			Check: resource.TestCheckResourceAttr(vmAddr, "name", "tf-test-b"),
+		}},
+	})
+}
+
+func TestNameMatches(t *testing.T) {
+	for _, tc := range []struct {
+		name, actual string
+		want         bool
+	}{
+		{"vm", "vm", true},
+		{"vm", "vm-faaef", true},
+		{"my-vm", "my-vm-faaef", true},
+		{"vm", "vm-", false},
+		{"vm", "vm-rstudio-faaef", false},
+		{"vm", "vmx-faaef", false},
+		{"vm", "other", false},
+	} {
+		if got := nameMatches(tc.name, tc.actual); got != tc.want {
+			t.Errorf("nameMatches(%q, %q) = %v, want %v", tc.name, tc.actual, got, tc.want)
+		}
+	}
 }
 
 func TestVM_ResearchEnvironmentWaitsForPlaybook(t *testing.T) {
@@ -322,8 +401,8 @@ func TestVM_WaitTimeoutReportsState(t *testing.T) {
 // polling do not fail the create.
 func TestVM_TransientPollErrorsAreRetried(t *testing.T) {
 	s := newFake(t)
-	// No GET vms/ happens before the create's wait starts.
-	s.FailRequests(http.MethodGet, "vms/", 2, http.StatusServiceUnavailable)
+	// No GET vms/{uuid}/ happens before the create's wait starts.
+	s.FailRequests(http.MethodGet, "vms/*/", 2, http.StatusServiceUnavailable)
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		CheckDestroy:             checkNoVMs(t, s),
@@ -338,7 +417,7 @@ func TestVM_TransientPollErrorsAreRetried(t *testing.T) {
 // more than client.MaxConsecutiveTransientErrors transient errors in a row.
 func TestVM_TooManyTransientPollErrorsFail(t *testing.T) {
 	s := newFake(t)
-	s.FailRequests(http.MethodGet, "vms/", client.MaxConsecutiveTransientErrors+1, http.StatusServiceUnavailable)
+	s.FailRequests(http.MethodGet, "vms/*/", client.MaxConsecutiveTransientErrors+1, http.StatusServiceUnavailable)
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		CheckDestroy:             checkNoVMs(t, s),

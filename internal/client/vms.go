@@ -6,27 +6,23 @@ import (
 	"net/url"
 )
 
-// ListVMs returns all VMs visible to the API key.
+// ListVMs returns all VMs visible to the API key. It uses vms/by-api-key/
+// because the general vms/ list answers HTTP 403 for API key users.
 func (c *Client) ListVMs(ctx context.Context) ([]VM, error) {
-	return listAll[VM](ctx, c, "vms/")
+	return listAll[VM](ctx, c, "vms/by-api-key/")
 }
 
-// GetVM returns the VM with the given uuid. ErrNotFound is returned when it is
-// not listed or is in the deleted state.
+// GetVM returns the VM with the given uuid. ErrNotFound is returned when it
+// does not exist (HTTP 404) or is in the deleted state.
 func (c *Client) GetVM(ctx context.Context, uuid string) (*VM, error) {
-	vms, err := c.ListVMs(ctx)
-	if err != nil {
+	var vm VM
+	if err := c.do(ctx, http.MethodGet, "vms/"+url.PathEscape(uuid)+"/", nil, &vm); err != nil {
 		return nil, err
 	}
-	for i := range vms {
-		if vms[i].UUID == uuid {
-			if vms[i].VMState == VMStateDeleted {
-				return nil, ErrNotFound
-			}
-			return &vms[i], nil
-		}
+	if vm.VMState == VMStateDeleted {
+		return nil, ErrNotFound
 	}
-	return nil, ErrNotFound
+	return &vm, nil
 }
 
 // CreateVM starts creation of a VM.

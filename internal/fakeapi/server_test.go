@@ -3,7 +3,6 @@ package fakeapi_test
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -83,7 +82,7 @@ func TestFake_VMLifecycle(t *testing.T) {
 
 	uuid := createVM(t, c, "vm1", "Ubuntu-22.04", nil)
 	vm := waitVM(t, c, uuid, isActive)
-	if vm.OpenstackID == nil || *vm.OpenstackID == "" || vm.Name != "vm1" || vm.Flavor.Name != "de.NBI small" {
+	if vm.OpenstackID == nil || *vm.OpenstackID == "" || vm.Name != "vm1-a0001" || vm.Flavor.Name != "de.NBI small" {
 		t.Fatalf("unexpected VM: %+v", vm)
 	}
 
@@ -187,7 +186,7 @@ func TestFake_VolumeAttach(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := waitVolume(t, c, created.UUID, client.VolumeStatusInUse)
-	if v.VirtualMachine == nil || v.VirtualMachine.Name != "vm1" || v.VirtualMachine.OpenstackID == nil || v.VirtualMachine.VMState != "active" {
+	if v.VirtualMachine == nil || v.VirtualMachine.Name != "vm1-a0001" || v.VirtualMachine.OpenstackID == nil || v.VirtualMachine.VMState != "active" {
 		t.Fatalf("bad virtual_machine: %+v", v.VirtualMachine)
 	}
 
@@ -305,27 +304,39 @@ func TestFake_SeedData(t *testing.T) {
 	}
 }
 
-func TestFake_VMListPagination(t *testing.T) {
+// TestFake_VMEndpoints checks that, like SimpleVM, GET vms/ is forbidden
+// for API keys while vms/by-api-key/ lists and vms/{uuid}/ reads VMs.
+func TestFake_VMEndpoints(t *testing.T) {
 	srv := fakeapi.New(t)
 	c := newClient(t, srv)
+	ctx := context.Background()
 	for i := range 3 {
 		createVM(t, c, "vm"+string(rune('a'+i)), "Ubuntu-22.04", nil)
 	}
-	req, _ := http.NewRequest(http.MethodGet, srv.URL()+"vms/?page=1&page_size=2", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL()+"vms/", nil)
 	req.Header.Set("X-API-KEY", fakeapi.APIKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	b, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(b), `"count":3`) || !strings.Contains(string(b), `"next":"`+srv.URL()+`vms/?page=2&page_size=2"`) {
-		t.Fatalf("unexpected page: %s", b)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET vms/ = %d, want 403", resp.StatusCode)
 	}
-	// The client follows the next link and sees everything.
-	vms, err := c.ListVMs(context.Background())
+	vms, err := c.ListVMs(ctx)
 	if err != nil || len(vms) != 3 {
 		t.Fatalf("%v %v", vms, err)
+	}
+	// SimpleVM appends a suffix to the requested name.
+	if !strings.HasPrefix(vms[0].Name, "vma-") || len(vms[0].Name) != len("vma-")+5 {
+		t.Fatalf("name = %q, want vma-<5 chars>", vms[0].Name)
+	}
+	vm, err := c.GetVM(ctx, vms[1].UUID)
+	if err != nil || vm.UUID != vms[1].UUID {
+		t.Fatalf("%v %v", vm, err)
+	}
+	if _, err := c.GetVM(ctx, "missing"); !client.IsNotFound(err) {
+		t.Fatalf("err = %v, want not found", err)
 	}
 }
 
@@ -407,7 +418,7 @@ func TestFake_FailRequestsAndRespondTo(t *testing.T) {
 	srv := fakeapi.New(t)
 	c := newClient(t, srv)
 	ctx := context.Background()
-	srv.FailRequests(http.MethodGet, "vms/", 2, http.StatusServiceUnavailable)
+	srv.FailRequests(http.MethodGet, "vms/by-api-key/", 2, http.StatusServiceUnavailable)
 	for i := range 2 {
 		var ae *client.APIError
 		if _, err := c.ListVMs(ctx); !asAPIError(err, &ae) || ae.StatusCode != http.StatusServiceUnavailable {
