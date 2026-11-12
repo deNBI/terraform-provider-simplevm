@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/deNBI/terraform-provider-simplevm/internal/client"
 	"github.com/deNBI/terraform-provider-simplevm/internal/fakeapi"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -137,6 +138,20 @@ func TestParsePollInterval(t *testing.T) {
 	}
 }
 
+func TestParseRetryWait(t *testing.T) {
+	if d, err := parseRetryWait(""); err != nil || d != client.DefaultRetryWait {
+		t.Fatalf("default: %v %v", d, err)
+	}
+	if d, err := parseRetryWait("5s"); err != nil || d != 5*time.Second {
+		t.Fatalf("valid: %v %v", d, err)
+	}
+	for _, bad := range []string{"abc", "0s", "-5s", "10"} {
+		if _, err := parseRetryWait(bad); err == nil {
+			t.Errorf("%q: expected error", bad)
+		}
+	}
+}
+
 // newFake starts a fake SimpleVM API and makes long-running operations poll fast.
 // SIMPLEVM_* variables are cleared so that exported acceptance-test settings
 // cannot leak into fake-server tests. Not usable with t.Parallel because of
@@ -147,6 +162,7 @@ func newFake(t *testing.T, opts ...fakeapi.Option) *fakeapi.Server {
 		t.Setenv(k, "")
 	}
 	t.Setenv("SIMPLEVM_POLL_INTERVAL", "10ms")
+	t.Setenv("SIMPLEVM_RETRY_WAIT", "1ms")
 	return fakeapi.New(t, opts...)
 }
 
