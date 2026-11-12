@@ -14,7 +14,8 @@ import (
 
 func newClient(t *testing.T, srv *fakeapi.Server) *client.Client {
 	t.Helper()
-	c, err := client.New(client.Config{Endpoint: srv.URL(), APIKey: fakeapi.APIKey})
+	// No client retries: these tests count the fake's answers one by one.
+	c, err := client.New(client.Config{Endpoint: srv.URL(), APIKey: fakeapi.APIKey, MaxAttempts: 1, RetryWait: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

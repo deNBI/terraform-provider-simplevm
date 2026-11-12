@@ -8,7 +8,7 @@ make test        # go test ./... -count=1
 
 - `internal/client` tests run against `httptest` servers: auth header, pagination, endpoint normalisation, errors, polling.
 - `internal/fakeapi` is a stateful fake of the SimpleVM API. Asynchronous operations advance one step per `GET`, so tests are deterministic and need no timers.
-- `internal/provider` tests (`TestXxx`) use `terraform-plugin-testing` against the fake server. They need a Terraform or OpenTofu binary but no credentials and no network access to SimpleVM. Tests that wait use a very short `SIMPLEVM_POLL_INTERVAL`.
+- `internal/provider` tests (`TestXxx`) use `terraform-plugin-testing` against the fake server. They need a Terraform or OpenTofu binary but no credentials and no network access to SimpleVM. Tests that wait use a very short `SIMPLEVM_POLL_INTERVAL` and `SIMPLEVM_RETRY_WAIT`.
 
 Lint with `make lint` (golangci-lint).
 

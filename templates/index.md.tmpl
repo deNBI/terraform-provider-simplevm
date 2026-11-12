@@ -59,6 +59,7 @@ export SIMPLEVM_PROJECT_ID="1234"
 | `SIMPLEVM_PROJECT_ID` | `project_id` | Default project for resources. |
 | `SIMPLEVM_ENDPOINT` | `endpoint` | API base URL; must be `https` (plain `http` is accepted only for loopback addresses, for testing). |
 | `SIMPLEVM_POLL_INTERVAL` | none | Polling interval as a Go duration such as `10s`. For development and testing only. |
+| `SIMPLEVM_RETRY_WAIT` | none | Base wait before retrying a request after a transient error, as a Go duration (default `1s`). For development and testing only. |
 
 ## Example Usage
 

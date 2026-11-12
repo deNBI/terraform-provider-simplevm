@@ -105,10 +105,17 @@ func (p *simpleVMProvider) Configure(ctx context.Context, req fwprovider.Configu
 		return
 	}
 
+	retryWait, err := parseRetryWait(os.Getenv("SIMPLEVM_RETRY_WAIT"))
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid SIMPLEVM_RETRY_WAIT", err.Error())
+		return
+	}
+
 	c, err := client.New(client.Config{
 		Endpoint:  resolved.Endpoint,
 		APIKey:    resolved.APIKey,
 		UserAgent: "terraform-provider-simplevm/" + p.version,
+		RetryWait: retryWait,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to create SimpleVM client", err.Error())
@@ -125,12 +132,22 @@ func (p *simpleVMProvider) Configure(ctx context.Context, req fwprovider.Configu
 
 // parsePollInterval parses SIMPLEVM_POLL_INTERVAL; empty selects the default.
 func parsePollInterval(v string) (time.Duration, error) {
+	return parseDurationEnv("SIMPLEVM_POLL_INTERVAL", v, DefaultPollInterval, "10s")
+}
+
+// parseRetryWait parses SIMPLEVM_RETRY_WAIT, the base wait before retrying a
+// request after a transient error; empty selects client.DefaultRetryWait.
+func parseRetryWait(v string) (time.Duration, error) {
+	return parseDurationEnv("SIMPLEVM_RETRY_WAIT", v, client.DefaultRetryWait, "1s")
+}
+
+func parseDurationEnv(name, v string, def time.Duration, example string) (time.Duration, error) {
 	if v == "" {
-		return DefaultPollInterval, nil
+		return def, nil
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("SIMPLEVM_POLL_INTERVAL must be a positive Go duration such as \"10s\", got %q", v)
+		return 0, fmt.Errorf("%s must be a positive Go duration such as %q, got %q", name, example, v)
 	}
 	return d, nil
 }

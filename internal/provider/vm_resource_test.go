@@ -413,11 +413,34 @@ func TestVM_TransientPollErrorsAreRetried(t *testing.T) {
 	})
 }
 
+// TestVM_TransientErrorsOnRefreshAndDestroyAreRetried checks that a refresh
+// and a destroy survive single 502/504 answers of the SimpleVM gateway,
+// which used to fail plan, apply and destroy.
+func TestVM_TransientErrorsOnRefreshAndDestroyAreRetried(t *testing.T) {
+	s := newFake(t)
+	cfg := vmConfig(s, "Ubuntu-22.04", "")
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkNoVMs(t, s),
+		Steps: []resource.TestStep{{
+			Config: cfg,
+		}, {
+			PreConfig: func() { s.FailRequests(http.MethodGet, "vms/*/", 2, http.StatusGatewayTimeout) },
+			Config:    cfg,
+			PlanOnly:  true,
+		}, {
+			PreConfig: func() { s.FailRequests(http.MethodDelete, "vms/*/", 1, http.StatusBadGateway) },
+			Config:    fakeProviderConfig(s),
+		}},
+	})
+}
+
 // TestVM_TooManyTransientPollErrorsFail checks that polling gives up after
-// more than client.MaxConsecutiveTransientErrors transient errors in a row.
+// more than client.MaxConsecutiveTransientErrors polls in a row failed with
+// a transient error, each after client.DefaultMaxAttempts requests.
 func TestVM_TooManyTransientPollErrorsFail(t *testing.T) {
 	s := newFake(t)
-	s.FailRequests(http.MethodGet, "vms/*/", client.MaxConsecutiveTransientErrors+1, http.StatusServiceUnavailable)
+	s.FailRequests(http.MethodGet, "vms/*/", (client.MaxConsecutiveTransientErrors+1)*client.DefaultMaxAttempts, http.StatusServiceUnavailable)
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		CheckDestroy:             checkNoVMs(t, s),
