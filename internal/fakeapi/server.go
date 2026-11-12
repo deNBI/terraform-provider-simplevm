@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,9 +23,8 @@ const (
 	// ProjectID is the id of the single seeded project.
 	ProjectID int64 = 1
 
-	pathPrefix      = "/portal/api/"
-	defaultPageSize = 10
-	createdAt       = "2026-01-01T00:00:00Z"
+	pathPrefix = "/portal/api/"
+	createdAt  = "2026-01-01T00:00:00Z"
 )
 
 // RecordedRequest is one request received by the fake, including rejected ones.
@@ -466,9 +464,14 @@ func (s *Server) route(r *http.Request, body []byte) response {
 	case p[0] == "projects" && len(p) >= 3 && p[1] == strconv.FormatInt(ProjectID, 10):
 		return only(m, http.MethodGet, bad, func() response { return s.projectSub(p[2:]) })
 	case p[0] == "vms" && len(p) == 1 && m == http.MethodGet:
-		return s.listVMs(r)
+		// Like SimpleVM: the general VM list is not open to API key users.
+		return detail(http.StatusForbidden, "You do not have permission to perform this action.")
 	case p[0] == "vms" && len(p) == 1 && m == http.MethodPost:
 		return s.createVM(body)
+	case p[0] == "vms" && len(p) == 2 && p[1] == "by-api-key":
+		return only(m, http.MethodGet, bad, s.listVMs)
+	case p[0] == "vms" && len(p) == 2 && m == http.MethodGet:
+		return s.getVM(p[1])
 	case p[0] == "vms" && len(p) == 2:
 		return only(m, http.MethodDelete, bad, func() response { return s.deleteVM(p[1]) })
 	case p[0] == "vms" && len(p) == 3 && p[2] == "action":
@@ -547,49 +550,25 @@ func (s *Server) imageKnown(name string) bool {
 
 // ---- VMs ----
 
-func (s *Server) listVMs(r *http.Request) response {
-	q := r.URL.Query()
-	pageNo, size := 1, defaultPageSize
-	if v := q.Get("page"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return detail(http.StatusNotFound, "Invalid page.")
-		}
-		pageNo = n
-	}
-	if v := q.Get("page_size"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			size = n
-		}
-	}
-	total := len(s.vmOrder)
-	start := (pageNo - 1) * size
-	if start >= total && (pageNo != 1 || total != 0) {
-		return detail(http.StatusNotFound, "Invalid page.")
-	}
-	end := min(start+size, total)
-	window := append([]string(nil), s.vmOrder[start:end]...)
-
+// listVMs answers vms/by-api-key/ which, like SimpleVM, returns a bare JSON
+// array without pagination.
+func (s *Server) listVMs() response {
 	results := []client.VM{}
-	for _, id := range window {
+	for _, id := range append([]string(nil), s.vmOrder...) {
 		vm := s.vms[id]
 		if s.advanceVM(vm) {
 			results = append(results, s.vmJSON(vm))
 		}
 	}
-	link := func(n int) any {
-		u := url.URL{Scheme: "http", Host: r.Host, Path: r.URL.Path}
-		u.RawQuery = fmt.Sprintf("page=%d&page_size=%d", n, size)
-		return u.String()
+	return response{http.StatusOK, results}
+}
+
+func (s *Server) getVM(uuid string) response {
+	vm, ok := s.vms[uuid]
+	if !ok || !s.advanceVM(vm) {
+		return detail(http.StatusNotFound, "No VirtualMachine matches the given query.")
 	}
-	var next, prev any
-	if end < total {
-		next = link(pageNo + 1)
-	}
-	if pageNo > 1 {
-		prev = link(pageNo - 1)
-	}
-	return response{http.StatusOK, map[string]any{"count": total, "next": next, "previous": prev, "results": results}}
+	return response{http.StatusOK, s.vmJSON(vm)}
 }
 
 func (s *Server) createVM(body []byte) response {
@@ -614,7 +593,8 @@ func (s *Server) createVM(body []byte) response {
 	}
 	uuid, osID := s.nextID("os-vm")
 	vm := &vmRec{
-		uuid: uuid, openstackID: osID, name: req.VMName, imageName: req.ImageName, flavor: *flavor,
+		// SimpleVM appends a random suffix to the requested name.
+		uuid: uuid, openstackID: osID, name: fmt.Sprintf("%s-%05x", req.VMName, 0xa0000+s.seq), imageName: req.ImageName, flavor: *flavor,
 		vmState: "planned", resenv: req.ResearchEnvironment != nil, playbookID: s.seq,
 		fixedIP: fmt.Sprintf("10.0.0.%d", s.seq+1),
 	}

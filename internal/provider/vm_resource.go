@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/deNBI/terraform-provider-simplevm/internal/client"
@@ -35,6 +36,7 @@ type vmModel struct {
 	ID                     types.String   `tfsdk:"id"`
 	ProjectID              types.Int64    `tfsdk:"project_id"`
 	Name                   types.String   `tfsdk:"name"`
+	FullName               types.String   `tfsdk:"full_name"`
 	Flavor                 types.String   `tfsdk:"flavor"`
 	Image                  types.String   `tfsdk:"image"`
 	ResearchEnvironment    types.Object   `tfsdk:"research_environment"`
@@ -92,10 +94,20 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown(), int64planmodifier.RequiresReplace()},
 			},
 			"name": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "Name of the VM, 1 to 100 characters. Changing it replaces the VM.",
-				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
-				Validators:          []validator.String{stringvalidator.LengthBetween(1, 100)},
+				Required: true,
+				MarkdownDescription: "Name of the VM, 1 to 100 characters. SimpleVM appends a suffix to it; see `full_name`. " +
+					"Changing it replaces the VM, unless `full_name` is the new name plus such a suffix (for example after an import).",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplaceIf(
+					nameRequiresReplace,
+					"Replaces the VM unless full_name is the new name plus the suffix SimpleVM appends.",
+					"Replaces the VM unless `full_name` is the new name plus the suffix SimpleVM appends.",
+				)},
+				Validators: []validator.String{stringvalidator.LengthBetween(1, 100)},
+			},
+			"full_name": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "Name of the VM in SimpleVM: `name` plus the suffix SimpleVM appends, for example `my-vm-faaef`.",
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"flavor": schema.StringAttribute{
 				Required:            true,
@@ -213,7 +225,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	// Terraform can destroy, instead of an orphaned VM.
 	plan.ID = types.StringValue(created.UUID)
 	plan.ProjectID = types.Int64Value(projectID)
-	for _, s := range []*types.String{&plan.OpenstackID, &plan.VMState, &plan.TaskState, &plan.FixedIP, &plan.ResearchEnvironmentURL, &plan.CreatedAt} {
+	for _, s := range []*types.String{&plan.FullName, &plan.OpenstackID, &plan.VMState, &plan.TaskState, &plan.FixedIP, &plan.ResearchEnvironmentURL, &plan.CreatedAt} {
 		*s = types.StringNull()
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -442,12 +454,40 @@ func untilGone(vm *client.VM) (bool, error) {
 	return vm == nil || slices.Contains(client.VMGoneStates, vm.VMState), nil
 }
 
-// applyVM copies the API view of vm into m. power_state is only taken from
-// stable VM states, and flavor, image and project_id only when unset (import),
-// so transient states and API naming quirks cause no drift.
+// nameMatches reports whether actual, the name SimpleVM reports, is name
+// itself or name plus the suffix SimpleVM appends on create ("-" and a short
+// token without dashes, for example "my-vm-faaef").
+func nameMatches(name, actual string) bool {
+	if actual == name {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(actual, name+"-")
+	return ok && suffix != "" && len(suffix) <= 16 && !strings.Contains(suffix, "-")
+}
+
+// nameRequiresReplace keeps a name change in place when the VM's full_name
+// already matches the new name, as after an import, which sets name to the
+// full name.
+func nameRequiresReplace(ctx context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+	var full types.String
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("full_name"), &full)...)
+	if full.IsNull() || full.IsUnknown() || req.PlanValue.IsUnknown() {
+		resp.RequiresReplace = true
+		return
+	}
+	resp.RequiresReplace = !nameMatches(req.PlanValue.ValueString(), full.ValueString())
+}
+
+// applyVM copies the API view of vm into m. name is kept while the reported
+// name matches it (see nameMatches); power_state is only taken from stable VM
+// states, and flavor, image and project_id only when unset (import), so
+// transient states and API naming quirks cause no drift.
 func applyVM(m *vmModel, vm *client.VM) {
 	m.ID = types.StringValue(vm.UUID)
-	m.Name = types.StringValue(vm.Name)
+	m.FullName = types.StringValue(vm.Name)
+	if m.Name.IsNull() || m.Name.IsUnknown() || !nameMatches(m.Name.ValueString(), vm.Name) {
+		m.Name = types.StringValue(vm.Name)
+	}
 	m.OpenstackID = types.StringPointerValue(vm.OpenstackID)
 	m.VMState = types.StringValue(vm.VMState)
 	m.TaskState = types.StringValue(taskState(vm))

@@ -141,8 +141,32 @@ func TestEndpoints(t *testing.T) {
 		})
 	}
 
-	t.Run("ListVMs and GetVM", func(t *testing.T) {
-		c := serve(t, expect{method: "GET", path: "vms/", resp: `[` + vmJSON + `]`})
+	// API keys may not use GET vms/ (HTTP 403); they list via vms/by-api-key/
+	// and read one VM via vms/{uuid}/.
+	t.Run("ListVMs", func(t *testing.T) {
+		c := serve(t, expect{method: "GET", path: "vms/by-api-key/", resp: `[` + vmJSON + `]`})
+		vms, err := c.ListVMs(ctx)
+		if err != nil || len(vms) != 1 || vms[0].UUID != "u1" {
+			t.Fatalf("vms=%+v err=%v", vms, err)
+		}
+	})
+
+	t.Run("GetVM not found", func(t *testing.T) {
+		c := serve(t, expect{method: "GET", path: "vms/u1/", status: http.StatusNotFound, resp: `{"detail":"No VirtualMachine matches the given query."}`})
+		if _, err := c.GetVM(ctx, "u1"); !IsNotFound(err) {
+			t.Fatalf("err = %v, want not found", err)
+		}
+	})
+
+	t.Run("GetVM deleted", func(t *testing.T) {
+		c := serve(t, expect{method: "GET", path: "vms/u1/", resp: `{"uuid":"u1","vm_state":"deleted"}`})
+		if _, err := c.GetVM(ctx, "u1"); !IsNotFound(err) {
+			t.Fatalf("err = %v, want not found", err)
+		}
+	})
+
+	t.Run("GetVM", func(t *testing.T) {
+		c := serve(t, expect{method: "GET", path: "vms/u1/", resp: vmJSON})
 		vm, err := c.GetVM(ctx, "u1")
 		if err != nil {
 			t.Fatal(err)
@@ -299,21 +323,6 @@ func TestVolume_ProjectIDNumberOrString(t *testing.T) {
 		var v Volume
 		if err := json.Unmarshal([]byte(in), &v); err != nil || v.ProjectID.String() != "7" {
 			t.Fatalf("%s: v=%+v err=%v", in, v, err)
-		}
-	}
-}
-
-func TestGetVM_NotFoundAndDeleted(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`[{"uuid":"a","vm_state":"active"},{"uuid":"d","vm_state":"deleted"}]`))
-	})
-	ctx := context.Background()
-	if vm, err := c.GetVM(ctx, "a"); err != nil || vm.UUID != "a" {
-		t.Fatalf("vm=%+v err=%v", vm, err)
-	}
-	for _, id := range []string{"missing", "d"} {
-		if _, err := c.GetVM(ctx, id); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("%s: err=%v", id, err)
 		}
 	}
 }
