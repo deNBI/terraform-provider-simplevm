@@ -1,5 +1,8 @@
 # terraform-provider-simplevm
 
+> [!CAUTION]
+> This is a very early implementation with known issues and deficiencies. Use at your own risk and please provide feedback and report bugs as [issues](https://github.com/deNBI/terraform-provider-simplevm/issues).
+
 Terraform and OpenTofu provider for [SimpleVM](https://simplevm.denbi.de/), the de.NBI Cloud portal for virtual machines. Describe VMs, research environments, volumes and snapshots as code and manage them with `tofu apply` or `terraform apply`.
 
 - Resources: `simplevm_vm`, `simplevm_volume`, `simplevm_volume_attachment`, `simplevm_snapshot`
