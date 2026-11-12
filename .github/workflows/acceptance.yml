@@ -34,7 +34,7 @@ jobs:
       - if: env.SIMPLEVM_API_KEY != ''
         uses: actions/checkout@v4
       - if: env.SIMPLEVM_API_KEY != ''
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - if: env.SIMPLEVM_API_KEY != '' && env.CLI == 'terraform'
