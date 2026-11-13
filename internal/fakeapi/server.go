@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -351,6 +352,12 @@ func (s *Server) vmJSON(vm *vmRec) client.VM {
 		out.Playbook = client.Playbooks{{ID: vm.playbookID, Done: vm.playbookDone}}
 		if vm.playbookDone {
 			out.ResearchEnvironmentURL = "https://simplevm.example/" + vm.uuid + "/"
+		}
+	}
+	if vm.vmState != "planned" && vm.vmState != client.VMStateBuilding {
+		out.Modes = []client.AccessMode{{Name: "SSH", Type: "terminal", CopyField: sshCommand(vm.fixedIP)}}
+		if vm.resenv {
+			out.Modes = append(out.Modes, client.AccessMode{Name: "vscode", Type: "browser", CopyField: out.ResearchEnvironmentURL})
 		}
 	}
 	return out
@@ -789,4 +796,15 @@ func (s *Server) createSnapshot(body []byte) response {
 	return response{http.StatusCreated, client.Snapshot{
 		Name: req.Name, OpenstackID: osID, Status: "queued", Description: req.Description, CreatedAt: createdAt, ProjectID: ProjectID,
 	}}
+}
+
+// SSHGateway is the host of the "SSH" access mode the fake reports for VMs.
+const SSHGateway = "192.0.2.10"
+
+// sshCommand is the "SSH" access mode command for a VM: like SimpleVM, the
+// fake reaches VMs through a gateway on port 30000 plus the last two bytes
+// of the fixed IP (10.0.0.1 -> 30001).
+func sshCommand(fixedIP string) string {
+	ip := netip.MustParseAddr(fixedIP).As4()
+	return fmt.Sprintf("ssh -i /path/to/your/ssh/private/key ubuntu@%s -p %d", SSHGateway, 30000+int(ip[2])*256+int(ip[3]))
 }

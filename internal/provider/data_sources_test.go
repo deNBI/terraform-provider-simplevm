@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/deNBI/terraform-provider-simplevm/internal/fakeapi"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -135,6 +136,25 @@ data "simplevm_volumes" "v" {}`,
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttr("data.simplevm_vms.v", "vms.#", "0"),
 				resource.TestCheckResourceAttr("data.simplevm_volumes.v", "volumes.#", "0"),
+			),
+		}},
+	})
+}
+
+func TestDataSourceVMs_SSHAccess(t *testing.T) {
+	s := newFake(t)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: vmConfig(s, "Ubuntu-22.04", "") + `
+data "simplevm_vms" "v" {
+  depends_on = [simplevm_vm.test]
+}`,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("data.simplevm_vms.v", "vms.#", "1"),
+				resource.TestCheckResourceAttr("data.simplevm_vms.v", "vms.0.ssh_host", fakeapi.SSHGateway),
+				checkSSHPortOfFixedIP("data.simplevm_vms.v", "vms.0."),
+				resource.TestCheckResourceAttr("data.simplevm_vms.v", "vms.0.ssh_user", "ubuntu"),
 			),
 		}},
 	})

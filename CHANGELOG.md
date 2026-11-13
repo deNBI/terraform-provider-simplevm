@@ -10,6 +10,7 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 - Resources `simplevm_vm` (base image or research environment, `power_state`), `simplevm_volume`, `simplevm_volume_attachment` and `simplevm_snapshot`.
 - Data sources `simplevm_project(s)`, `simplevm_flavor(s)`, `simplevm_image(s)`, `simplevm_snapshot_images`, `simplevm_vms` and `simplevm_volumes`.
 - Generated reference documentation, a user guide for the SimpleVM wiki and the `research-vm` example module.
+- Computed attributes `ssh_host`, `ssh_port` and `ssh_user` on `simplevm_vm` and on the VMs of `simplevm_vms`, from the VM's SSH access mode in SimpleVM (usually the site's SSH gateway and a port per VM). They can be used in `connection` blocks and inventories. Hosts and users that ssh could read as an option are rejected, and the attributes are null then.
 
 ### Fixed
 

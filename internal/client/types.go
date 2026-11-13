@@ -154,6 +154,16 @@ type VM struct {
 	Flavor                 Flavor    `json:"flavor"`
 	Playbook               Playbooks `json:"playbook"`
 	CreatedAtDate          *string   `json:"created_at_date"`
+	// Modes are the ways to access the VM, as shown in the portal.
+	Modes []AccessMode `json:"modes"`
+}
+
+// AccessMode is one way to access a VM, for example the "SSH" mode with
+// the ssh command line in CopyField, or a research environment's URL.
+type AccessMode struct {
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	CopyField string `json:"copy_field"`
 }
 
 // VolumeMachine is the VM a volume is attached to.

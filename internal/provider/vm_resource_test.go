@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strings"
 	"testing"
@@ -39,6 +40,28 @@ func captureID(name string, id *string) resource.TestCheckFunc {
 			return fmt.Errorf("%s not found in state", name)
 		}
 		*id = rs.Primary.ID
+		return nil
+	}
+}
+
+// checkSSHPortOfFixedIP checks that the ssh_port attribute (under prefix,
+// for example "vms.0.") is the fake's port for the fixed_ip next to it:
+// 30000 plus the last two bytes of the address.
+func checkSSHPortOfFixedIP(name, prefix string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[name]
+		if !ok {
+			return fmt.Errorf("%s not found in state", name)
+		}
+		ip, err := netip.ParseAddr(rs.Primary.Attributes[prefix+"fixed_ip"])
+		if err != nil {
+			return err
+		}
+		b := ip.As4()
+		want := fmt.Sprint(30000 + int(b[2])*256 + int(b[3]))
+		if got := rs.Primary.Attributes[prefix+"ssh_port"]; got != want {
+			return fmt.Errorf("%s: %sssh_port = %q, want %s for fixed_ip %s", name, prefix, got, want, ip)
+		}
 		return nil
 	}
 }
@@ -97,6 +120,10 @@ func TestVM_BaseImage(t *testing.T) {
 				resource.TestCheckResourceAttrSet(vmAddr, "fixed_ip"),
 				resource.TestCheckResourceAttrSet(vmAddr, "created_at"),
 				resource.TestCheckNoResourceAttr(vmAddr, "research_environment"),
+				// From the "SSH" access mode: gateway host and the VM's port.
+				resource.TestCheckResourceAttr(vmAddr, "ssh_host", fakeapi.SSHGateway),
+				checkSSHPortOfFixedIP(vmAddr, ""),
+				resource.TestCheckResourceAttr(vmAddr, "ssh_user", "ubuntu"),
 			),
 		}, {
 			Config: vmConfig(s, "Ubuntu-22.04", `  power_state = "stopped"`),

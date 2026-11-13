@@ -23,6 +23,9 @@ type vmItem struct {
 	FixedIP   types.String `tfsdk:"fixed_ip"`
 	ImageName types.String `tfsdk:"image_name"`
 	Flavor    types.String `tfsdk:"flavor_name"`
+	SSHHost   types.String `tfsdk:"ssh_host"`
+	SSHPort   types.Int64  `tfsdk:"ssh_port"`
+	SSHUser   types.String `tfsdk:"ssh_user"`
 }
 
 type vmsModel struct {
@@ -55,6 +58,9 @@ func (d *vmsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 					"fixed_ip":    schema.StringAttribute{Computed: true, MarkdownDescription: "Fixed IP address."},
 					"image_name":  schema.StringAttribute{Computed: true, MarkdownDescription: "Name of the image the VM was created from."},
 					"flavor_name": schema.StringAttribute{Computed: true, MarkdownDescription: "Name of the VM flavor."},
+					"ssh_host":    schema.StringAttribute{Computed: true, MarkdownDescription: "Host to connect to over SSH (usually the site's SSH gateway); null without SSH access. See `simplevm_vm`."},
+					"ssh_port":    schema.Int64Attribute{Computed: true, MarkdownDescription: "Port to connect to over SSH; null without SSH access."},
+					"ssh_user":    schema.StringAttribute{Computed: true, MarkdownDescription: "User to log in as over SSH; null without SSH access or when SimpleVM names none."},
 				}},
 			},
 		},
@@ -77,6 +83,7 @@ func (d *vmsDataSource) Read(ctx context.Context, _ datasource.ReadRequest, resp
 		if v.TaskState != nil {
 			task = *v.TaskState
 		}
+		sshHost, sshPort, sshUser := sshValues(&v)
 		m.VMs = append(m.VMs, vmItem{
 			UUID:      types.StringValue(v.UUID),
 			Name:      types.StringValue(v.Name),
@@ -85,6 +92,9 @@ func (d *vmsDataSource) Read(ctx context.Context, _ datasource.ReadRequest, resp
 			FixedIP:   types.StringValue(v.FixedIP),
 			ImageName: types.StringValue(v.ImageName),
 			Flavor:    types.StringValue(v.Flavor.Name),
+			SSHHost:   sshHost,
+			SSHPort:   sshPort,
+			SSHUser:   sshUser,
 		})
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)

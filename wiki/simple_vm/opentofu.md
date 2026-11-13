@@ -211,6 +211,45 @@ You can **grow** a volume by increasing `size`; this happens in place and keeps 
 
 Deleting a VM detaches its volumes and keeps them.
 
+### Log in over SSH
+
+SimpleVM copies the public SSH key from your SimpleVM profile into every new VM. Set a key in your profile **before** you create the VM; without one you cannot log in over SSH. The owner of the API key is the owner of the VM, so it is that person's key that counts.
+
+The private key never leaves your computer: neither SimpleVM nor the provider sees it. You tell `ssh` (or OpenTofu) which key to use. VMs are usually reached through the SSH gateway of the site on a port of their own; the provider reports both as `ssh_host` and `ssh_port`, and the user name as `ssh_user`:
+
+```hcl
+variable "ssh_private_key_file" {
+  type    = string
+  default = "~/.ssh/id_ed25519" # the private key that belongs to the public key in your profile
+}
+
+output "ssh_command" {
+  value = "ssh -i ${var.ssh_private_key_file} -p ${simplevm_vm.base.ssh_port} ${simplevm_vm.base.ssh_user}@${simplevm_vm.base.ssh_host}"
+}
+```
+
+After `tofu apply`, `tofu output -raw ssh_command` prints the command to log in. The same attributes work in a `connection` block, for example to install packages once the VM is created:
+
+```hcl
+resource "terraform_data" "tools" {
+  triggers_replace = [simplevm_vm.base.id]
+
+  connection {
+    type        = "ssh"
+    host        = simplevm_vm.base.ssh_host
+    port        = simplevm_vm.base.ssh_port
+    user        = simplevm_vm.base.ssh_user
+    private_key = file(pathexpand(var.ssh_private_key_file))
+  }
+
+  provisioner "remote-exec" {
+    inline = ["sudo apt-get update", "sudo apt-get install -y htop"]
+  }
+}
+```
+
+Provisioners run only when the resource is created. For anything beyond a few commands, use a configuration tool such as Ansible; the `simplevm_vms` data source reports `ssh_host`, `ssh_port` and `ssh_user` for every VM, which is enough to build an inventory.
+
 ### Stop and start a VM
 
 Set `power_state` to `stopped` or `active`:
