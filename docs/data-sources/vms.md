@@ -33,6 +33,9 @@ Read-Only:
 - `flavor_name` (String) Name of the VM flavor.
 - `image_name` (String) Name of the image the VM was created from.
 - `name` (String) VM name.
+- `ssh_host` (String) Host to connect to over SSH (usually the site's SSH gateway); null without SSH access. See `simplevm_vm`.
+- `ssh_port` (Number) Port to connect to over SSH; null without SSH access.
+- `ssh_user` (String) User to log in as over SSH; null without SSH access or when SimpleVM names none.
 - `state` (String) VM state, for example `active` or `stopped`.
 - `task_state` (String) Current task state, empty if none.
 - `uuid` (String) VM UUID.

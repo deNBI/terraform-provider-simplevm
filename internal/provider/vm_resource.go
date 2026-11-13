@@ -46,6 +46,9 @@ type vmModel struct {
 	VMState                types.String   `tfsdk:"vm_state"`
 	TaskState              types.String   `tfsdk:"task_state"`
 	FixedIP                types.String   `tfsdk:"fixed_ip"`
+	SSHHost                types.String   `tfsdk:"ssh_host"`
+	SSHPort                types.Int64    `tfsdk:"ssh_port"`
+	SSHUser                types.String   `tfsdk:"ssh_user"`
 	ResearchEnvironmentURL types.String   `tfsdk:"research_environment_url"`
 	CreatedAt              types.String   `tfsdk:"created_at"`
 }
@@ -77,6 +80,11 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"`power_state` only takes `active` or `stopped` and is the only argument that can change " +
 			"in place; every other argument replaces the VM. While the VM is in a transient state " +
 			"(for example `building` or `rebooting`) a refresh does not report `power_state` drift.\n\n" +
+			"`ssh_host`, `ssh_port` and `ssh_user` tell how to log in over SSH, usually through the " +
+			"site's SSH gateway on a port of the VM's own. SimpleVM copies the public SSH key from the " +
+			"SimpleVM profile of the VM's owner (the owner of the API key) into `authorized_keys` of the " +
+			"new VM, so set a key in your profile before creating VMs. The provider never sees the " +
+			"private key: pass it to `ssh` or to a `connection` block yourself.\n\n" +
 			"Importing does not restore `research_environment`, because SimpleVM does not report it. " +
 			"Add `lifecycle { ignore_changes = [research_environment] }` to an imported research " +
 			"environment VM to keep it from being replaced.",
@@ -169,6 +177,19 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Computed:            true,
 				MarkdownDescription: "Fixed (internal) IP address of the VM.",
 			},
+			"ssh_host": schema.StringAttribute{
+				Computed: true,
+				MarkdownDescription: "Host to connect to over SSH: usually the SSH gateway of the site, not the VM's `fixed_ip`. " +
+					"Null while SimpleVM reports no SSH access for the VM.",
+			},
+			"ssh_port": schema.Int64Attribute{
+				Computed:            true,
+				MarkdownDescription: "Port to connect to over SSH; on the gateway each VM has a port of its own. Null like `ssh_host`.",
+			},
+			"ssh_user": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "User to log in as over SSH, for example `ubuntu`. Null like `ssh_host`, or when SimpleVM names no user.",
+			},
 			"research_environment_url": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "URL of the research environment; empty for VMs without one.",
@@ -225,9 +246,10 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	// Terraform can destroy, instead of an orphaned VM.
 	plan.ID = types.StringValue(created.UUID)
 	plan.ProjectID = types.Int64Value(projectID)
-	for _, s := range []*types.String{&plan.FullName, &plan.OpenstackID, &plan.VMState, &plan.TaskState, &plan.FixedIP, &plan.ResearchEnvironmentURL, &plan.CreatedAt} {
+	for _, s := range []*types.String{&plan.FullName, &plan.OpenstackID, &plan.VMState, &plan.TaskState, &plan.FixedIP, &plan.SSHHost, &plan.SSHUser, &plan.ResearchEnvironmentURL, &plan.CreatedAt} {
 		*s = types.StringNull()
 	}
+	plan.SSHPort = types.Int64Null()
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -492,6 +514,7 @@ func applyVM(m *vmModel, vm *client.VM) {
 	m.VMState = types.StringValue(vm.VMState)
 	m.TaskState = types.StringValue(taskState(vm))
 	m.FixedIP = types.StringValue(vm.FixedIP)
+	m.SSHHost, m.SSHPort, m.SSHUser = sshValues(vm)
 	m.ResearchEnvironmentURL = types.StringValue(vm.ResearchEnvironmentURL)
 	m.CreatedAt = types.StringPointerValue(vm.CreatedAtDate)
 	if vm.VMState == client.VMStateActive || vm.VMState == client.VMStateStopped {
@@ -524,4 +547,18 @@ func researchEnvironment(ctx context.Context, o types.Object) (*client.ResearchE
 		UserPath:   re.UserPath.ValueString(),
 		CreateOnly: re.CreateOnly.ValueBool(),
 	}, diags
+}
+
+// sshValues returns ssh_host, ssh_port and ssh_user for vm; all null when
+// SimpleVM reports no valid SSH access (see client.VM.SSH).
+func sshValues(vm *client.VM) (host types.String, port types.Int64, user types.String) {
+	a := vm.SSH()
+	if a == nil {
+		return types.StringNull(), types.Int64Null(), types.StringNull()
+	}
+	user = types.StringNull()
+	if a.User != "" {
+		user = types.StringValue(a.User)
+	}
+	return types.StringValue(a.Host), types.Int64Value(a.Port), user
 }

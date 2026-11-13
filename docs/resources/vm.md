@@ -6,6 +6,7 @@ description: |-
   A SimpleVM virtual machine, optionally with a research environment.
   Creating a VM is asynchronous: the provider polls SimpleVM until the VM is active and, with a research_environment, until its playbook has finished. A failed playbook (task_state = playbook_failed) fails the apply and the VM is tainted, so the next apply replaces it. Stopping, resuming and deleting are polled the same way; see timeouts. If a VM created with power_state = "stopped" cannot be stopped, the apply only warns: the VM is kept and the next plan shows the stop as an in-place update.
   power_state only takes active or stopped and is the only argument that can change in place; every other argument replaces the VM. While the VM is in a transient state (for example building or rebooting) a refresh does not report power_state drift.
+  ssh_host, ssh_port and ssh_user tell how to log in over SSH, usually through the site's SSH gateway on a port of the VM's own. SimpleVM copies the public SSH key from the SimpleVM profile of the VM's owner (the owner of the API key) into authorized_keys of the new VM, so set a key in your profile before creating VMs. The provider never sees the private key: pass it to ssh or to a connection block yourself.
   Importing does not restore research_environment, because SimpleVM does not report it. Add lifecycle { ignore_changes = [research_environment] } to an imported research environment VM to keep it from being replaced.
 ---
 
@@ -17,6 +18,8 @@ Creating a VM is asynchronous: the provider polls SimpleVM until the VM is `acti
 
 `power_state` only takes `active` or `stopped` and is the only argument that can change in place; every other argument replaces the VM. While the VM is in a transient state (for example `building` or `rebooting`) a refresh does not report `power_state` drift.
 
+`ssh_host`, `ssh_port` and `ssh_user` tell how to log in over SSH, usually through the site's SSH gateway on a port of the VM's own. SimpleVM copies the public SSH key from the SimpleVM profile of the VM's owner (the owner of the API key) into `authorized_keys` of the new VM, so set a key in your profile before creating VMs. The provider never sees the private key: pass it to `ssh` or to a `connection` block yourself.
+
 Importing does not restore `research_environment`, because SimpleVM does not report it. Add `lifecycle { ignore_changes = [research_environment] }` to an imported research environment VM to keep it from being replaced.
 
 ## Example Usage
@@ -27,6 +30,34 @@ resource "simplevm_vm" "base" {
   name   = "analysis"
   flavor = "de.NBI default"
   image  = "Ubuntu-22.04"
+}
+
+# Log in over SSH. SimpleVM copies the public key from your SimpleVM profile
+# into the new VM, so set it there first; the private key stays with you.
+variable "ssh_private_key_file" {
+  type    = string
+  default = "~/.ssh/id_ed25519"
+}
+
+output "ssh_command" {
+  value = "ssh -i ${var.ssh_private_key_file} -p ${simplevm_vm.base.ssh_port} ${simplevm_vm.base.ssh_user}@${simplevm_vm.base.ssh_host}"
+}
+
+# Or run commands on the VM once it is created.
+resource "terraform_data" "tools" {
+  triggers_replace = [simplevm_vm.base.id]
+
+  connection {
+    type        = "ssh"
+    host        = simplevm_vm.base.ssh_host
+    port        = simplevm_vm.base.ssh_port
+    user        = simplevm_vm.base.ssh_user
+    private_key = file(pathexpand(var.ssh_private_key_file))
+  }
+
+  provisioner "remote-exec" {
+    inline = ["sudo apt-get update", "sudo apt-get install -y htop"]
+  }
 }
 
 # A VM with an RStudio research environment, created stopped.
@@ -75,6 +106,9 @@ resource "simplevm_vm" "rstudio" {
 - `id` (String) UUID of the VM in SimpleVM.
 - `openstack_id` (String) OpenStack ID of the VM.
 - `research_environment_url` (String) URL of the research environment; empty for VMs without one.
+- `ssh_host` (String) Host to connect to over SSH: usually the SSH gateway of the site, not the VM's `fixed_ip`. Null while SimpleVM reports no SSH access for the VM.
+- `ssh_port` (Number) Port to connect to over SSH; on the gateway each VM has a port of its own. Null like `ssh_host`.
+- `ssh_user` (String) User to log in as over SSH, for example `ubuntu`. Null like `ssh_host`, or when SimpleVM names no user.
 - `task_state` (String) Current task state as reported by SimpleVM, for example `building_playbook`; empty when idle.
 - `vm_state` (String) Current VM state as reported by SimpleVM, for example `active`, `stopped` or `building`.
 
