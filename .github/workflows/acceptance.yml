@@ -38,7 +38,7 @@ jobs:
         with:
           go-version-file: go.mod
       - if: env.SIMPLEVM_API_KEY != '' && env.CLI == 'terraform'
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
       - if: env.SIMPLEVM_API_KEY != '' && env.CLI == 'tofu'
